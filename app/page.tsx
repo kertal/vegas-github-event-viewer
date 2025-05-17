@@ -806,13 +806,6 @@ export default function GitHubEventViewer() {
             </span>
           )}
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowReportPreview(true)}
-          >
-            Preview Report
-          </Button>
-          <Button
             variant="ghost"
             size="icon"
             onClick={() => {
@@ -938,9 +931,13 @@ export default function GitHubEventViewer() {
                 {viewMode === "grouped" ? "Show Timeline" : "Show Grouped"}
               </Button>
             </div>
-            <Button onClick={exportEvents} size="sm" className="flex items-center gap-2">
+            <Button 
+              onClick={() => setShowReportPreview(true)} 
+              size="sm" 
+              className="flex items-center gap-2"
+            >
               <ClipboardCopy className="h-4 w-4" />
-              Export {selectedEvents.size > 0 ? `(${selectedEvents.size})` : "All"}
+              Generate Report {selectedEvents.size > 0 ? `(${selectedEvents.size})` : "(All)"}
             </Button>
           </div>
 
@@ -1152,13 +1149,18 @@ export default function GitHubEventViewer() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-background rounded-lg shadow-lg w-full max-w-3xl max-h-[80vh] flex flex-col">
             <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-lg font-semibold">Report Preview</h2>
+              <h2 className="text-lg font-semibold">
+                Report Preview {selectedEvents.size > 0 ? `(${selectedEvents.size} selected)` : "(All Events)"}
+              </h2>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    const report = generateReport(getFilteredEvents(events))
+                    const eventsToExport = events.filter((event) => 
+                      selectedEvents.size === 0 || selectedEvents.has(event.id)
+                    )
+                    const report = generateReport(eventsToExport)
                     navigator.clipboard.writeText(report)
                     toast({
                       title: "Report copied",
@@ -1191,7 +1193,9 @@ export default function GitHubEventViewer() {
                     ),
                   }}
                 >
-                  {generateReport(getFilteredEvents(events))}
+                  {generateReport(events.filter((event) => 
+                    selectedEvents.size === 0 || selectedEvents.has(event.id)
+                  ))}
                 </ReactMarkdown>
               </div>
             </div>
