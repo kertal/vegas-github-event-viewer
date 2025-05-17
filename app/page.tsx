@@ -34,7 +34,10 @@ interface GitHubEvent {
 // Add event category type
 type EventCategory = "PR" | "Issue" | "Other"
 
-// Update the UserPreferences interface to include selectedEvents and expandedEvents
+// Add view mode type
+type ViewMode = "grouped" | "timeline"
+
+// Update the UserPreferences interface to include selectedEvents, expandedEvents, and viewMode
 interface UserPreferences {
   username: string
   startDate: string
@@ -42,6 +45,21 @@ interface UserPreferences {
   selectedEvents: string[]
   expandedEvents: string[]
   lastTheme: string
+  viewMode: ViewMode
+}
+
+// Add interface for related events
+interface RelatedEvents {
+  issue?: GitHubEvent
+  pr?: GitHubEvent
+  comments: GitHubEvent[]
+}
+
+// Add interface for commit
+interface Commit {
+  message: string
+  sha: string
+  url: string
 }
 
 // Add function to categorize events
@@ -78,6 +96,114 @@ const groupEventsByCategory = (events: GitHubEvent[]) => {
   }, {} as Record<EventCategory, GitHubEvent[]>)
 }
 
+// Add function to find related events
+const findRelatedEvents = (events: GitHubEvent[]): Map<string, RelatedEvents> => {
+  const relatedEvents = new Map<string, RelatedEvents>()
+  
+  // First pass: collect all PRs and issues
+  events.forEach(event => {
+    if (event.type === "PullRequestEvent" && event.payload.pull_request?.number) {
+      const prNumber = event.payload.pull_request.number
+      const key = `${event.repo.name}#${prNumber}`
+      if (!relatedEvents.has(key)) {
+        relatedEvents.set(key, { pr: event, comments: [] })
+      }
+    } else if (event.type === "IssuesEvent" && event.payload.issue?.number) {
+      const issueNumber = event.payload.issue.number
+      const key = `${event.repo.name}#${issueNumber}`
+      if (!relatedEvents.has(key)) {
+        relatedEvents.set(key, { issue: event, comments: [] })
+      }
+    } else if (event.type === "IssueCommentEvent" || event.type === "PullRequestReviewCommentEvent") {
+      const number = event.payload.issue?.number || event.payload.pull_request?.number
+      if (number) {
+        const key = `${event.repo.name}#${number}`
+        const existing = relatedEvents.get(key) || { comments: [] }
+        existing.comments.push(event)
+        relatedEvents.set(key, existing)
+      }
+    }
+  })
+
+  // Second pass: link PRs to issues they close
+  events.forEach(event => {
+    if (event.type === "PullRequestEvent" && event.payload.pull_request?.number) {
+      const pr = event.payload.pull_request
+      if (pr.body) {
+        // Look for "Fixes #123" or "Closes #123" in PR body
+        const closingMatches = pr.body.match(/(?:fixes|closes|resolves)\s+#(\d+)/gi)
+        if (closingMatches) {
+          closingMatches.forEach((match: string) => {
+            const issueNumber = match.match(/\d+/)?.[0]
+            if (issueNumber) {
+              const issueKey = `${event.repo.name}#${issueNumber}`
+              const prKey = `${event.repo.name}#${pr.number}`
+              const issueData = relatedEvents.get(issueKey)
+              const prData = relatedEvents.get(prKey)
+              
+              if (issueData && prData) {
+                // Merge the data
+                relatedEvents.set(issueKey, {
+                  ...issueData,
+                  pr: prData.pr,
+                  comments: [...issueData.comments, ...prData.comments]
+                })
+                relatedEvents.delete(prKey)
+              }
+            }
+          })
+        }
+      }
+    }
+  })
+
+  return relatedEvents
+}
+
+// Add function to group events for timeline view
+const groupRelatedEventsForTimeline = (events: GitHubEvent[]): GitHubEvent[] => {
+  const relatedEvents = findRelatedEvents(events)
+  const processedEvents = new Set<string>()
+  const timelineEvents: GitHubEvent[] = []
+
+  events.forEach(event => {
+    if (processedEvents.has(event.id)) return
+
+    const key = `${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`
+    const related = relatedEvents.get(key)
+
+    if (related?.pr && related?.issue) {
+      // Add both related events together
+      timelineEvents.push(related.issue, related.pr)
+      processedEvents.add(related.issue.id)
+      processedEvents.add(related.pr.id)
+    } else {
+      // Add single event
+      timelineEvents.push(event)
+      processedEvents.add(event.id)
+    }
+  })
+
+  // Sort by date
+  return timelineEvents.sort((a, b) => 
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+}
+
+// Add function to find PR references in commit messages
+const findPRReferences = (commitMessage: string, repo: string): { number: number; url: string } | null => {
+  // Look for patterns like "PR #123" or "fixes #123" or "closes #123"
+  const prMatch = commitMessage.match(/(?:PR|fixes|closes|resolves)\s+#(\d+)/i)
+  if (prMatch) {
+    const prNumber = parseInt(prMatch[1], 10)
+    return {
+      number: prNumber,
+      url: `https://github.com/${repo}/pull/${prNumber}`
+    }
+  }
+  return null
+}
+
 export default function GitHubEventViewer() {
   // State
   const [events, setEvents] = useState<GitHubEvent[]>([])
@@ -88,6 +214,7 @@ export default function GitHubEventViewer() {
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set())
+  const [viewMode, setViewMode] = useState<ViewMode>("grouped")
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -101,6 +228,7 @@ export default function GitHubEventViewer() {
         setUsername(prefs.username || "")
         setStartDate(prefs.startDate ? new Date(prefs.startDate) : subDays(new Date(), 4))
         setEndDate(prefs.endDate ? new Date(prefs.endDate) : new Date())
+        setViewMode(prefs.viewMode || "grouped")
 
         // Restore selected and expanded events
         if (prefs.selectedEvents) {
@@ -140,9 +268,10 @@ export default function GitHubEventViewer() {
       selectedEvents: Array.from(selectedEvents),
       expandedEvents: Array.from(expandedEvents),
       lastTheme: theme || "system",
+      viewMode,
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
-  }, [username, startDate, endDate, selectedEvents, expandedEvents, theme])
+  }, [username, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode])
 
   // Fetch events from GitHub API
   const fetchEvents = async () => {
@@ -326,7 +455,7 @@ export default function GitHubEventViewer() {
   }
 
   // Get human-friendly summary for event
-  const getEventSummary = (event: GitHubEvent) => {
+  const getEventSummary = (event: GitHubEvent, relatedEvents?: RelatedEvents) => {
     const actor = event.actor.login
     const repo = event.repo.name
 
@@ -336,20 +465,43 @@ export default function GitHubEventViewer() {
           summary: `${actor} created ${event.payload.ref_type} ${event.payload.ref || ""} in ${repo}`,
           title: event.payload.ref || ""
         }
-      case "PushEvent":
+      case "PushEvent": {
+        const commits = (event.payload.commits || []) as Commit[]
+        const prRefs = commits
+          .map(commit => findPRReferences(commit.message, repo))
+          .filter((ref): ref is { number: number; url: string } => ref !== null)
+        
+        const prInfo = prRefs.length > 0 
+          ? `PR #${prRefs.map(ref => ref.number).join(", #")}`
+          : event.payload.head || ""
+
         return {
           summary: `${actor} pushed ${event.payload.size} commit(s) to ${repo}`,
-          title: event.payload.head || ""
+          title: prInfo
         }
+      }
       case "IssuesEvent":
+        const issueNumber = event.payload.issue?.number
+        const issueTitle = event.payload.issue?.title || ""
+        const closedByPR = relatedEvents?.pr
         return {
           summary: `${actor} ${event.payload.action} issue in ${repo}`,
-          title: `#${event.payload.issue?.number} ${event.payload.issue?.title || ""}`
+          title: `#${issueNumber} ${issueTitle}${closedByPR ? ` (closed by PR #${closedByPR.payload.pull_request.number})` : ""}`
         }
       case "PullRequestEvent":
+        const prNumber = event.payload.pull_request?.number
+        const prTitle = event.payload.pull_request?.title || ""
+        const closesIssue = relatedEvents?.issue
         return {
           summary: `${actor} ${event.payload.action} pull request in ${repo}`,
-          title: `#${event.payload.pull_request?.number} ${event.payload.pull_request?.title || ""}`
+          title: `#${prNumber} ${prTitle}${closesIssue ? ` (closes issue #${closesIssue.payload.issue.number})` : ""}`
+        }
+      case "PullRequestReviewEvent":
+        const reviewPrNumber = event.payload.pull_request?.number
+        const reviewPrTitle = event.payload.pull_request?.title || ""
+        return {
+          summary: `${actor} ${event.payload.action} review on pull request in ${repo}`,
+          title: `#${reviewPrNumber} ${reviewPrTitle}`
         }
       case "IssueCommentEvent":
         return {
@@ -532,6 +684,13 @@ export default function GitHubEventViewer() {
               <Button variant="outline" size="sm" onClick={selectAllEvents}>
                 {selectedEvents.size === events.length ? "Deselect All" : "Select All"}
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setViewMode(viewMode === "grouped" ? "timeline" : "grouped")}
+              >
+                {viewMode === "grouped" ? "Show Timeline" : "Show Grouped"}
+              </Button>
             </div>
             <Button onClick={exportEvents} size="sm" className="flex items-center gap-2">
               <ClipboardCopy className="h-4 w-4" />
@@ -540,79 +699,176 @@ export default function GitHubEventViewer() {
           </div>
 
           <div className="space-y-3">
-            {Object.entries(groupEventsByCategory(events)).map(([category, categoryEvents]) => (
-              <div key={category} className="space-y-1">
-                <h2 className="text-sm font-semibold text-muted-foreground">
-                  {category === "PR" ? "Pull Request Activity" : 
-                   category === "Issue" ? "Issue Activity" : 
-                   "Other Activity"} ({categoryEvents.length})
-                </h2>
-                {categoryEvents.map((event) => {
-                  const eventInfo = getEventSummary(event)
-                  return (
-                    <Card
-                      key={event.id}
-                      className={cn("overflow-hidden transition-all", selectedEvents.has(event.id) && "border-primary")}
-                    >
-                      <CardContent className="p-0">
-                        <div
-                          className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                          onClick={() => toggleEventSelection(event.id)}
-                        >
-                          <div className="text-lg mt-1" aria-hidden="true">
-                            {getEventEmoji(event.type)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex justify-between items-start gap-2">
-                              <a
-                                href={getEventUrl(event)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm font-medium hover:underline truncate"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {eventInfo.summary}
-                              </a>
-                              <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                                {format(new Date(event.created_at), "MMM d, HH:mm")}
-                              </span>
-                            </div>
-                            {eventInfo.title && (
-                              <div className="text-xs text-muted-foreground truncate mt-0.5">
-                                {eventInfo.title}
-                              </div>
-                            )}
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="ml-auto h-6 w-6 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleEventExpansion(event.id)
-                            }}
-                          >
-                            {expandedEvents.has(event.id) ? (
-                              <ChevronUp className="h-3 w-3" />
-                            ) : (
-                              <ChevronDown className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </div>
-
-                        {expandedEvents.has(event.id) && (
-                          <div className="px-3 pb-2 pt-0">
-                            <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
-                              <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
-                            </div>
-                          </div>
+            {viewMode === "grouped" ? (
+              // Grouped view
+              Object.entries(groupEventsByCategory(events)).map(([category, categoryEvents]) => (
+                <div key={category} className="space-y-1">
+                  <h2 className="text-sm font-semibold text-muted-foreground">
+                    {category === "PR" ? "Pull Request Activity" : 
+                     category === "Issue" ? "Issue Activity" : 
+                     "Other Activity"} ({categoryEvents.length})
+                  </h2>
+                  {categoryEvents.map((event) => {
+                    const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
+                    const eventInfo = getEventSummary(event, relatedEvents)
+                    return (
+                      <Card
+                        key={event.id}
+                        className={cn(
+                          "overflow-hidden transition-all",
+                          selectedEvents.has(event.id) && "border-primary",
+                          relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
                         )}
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-              </div>
-            ))}
+                      >
+                        <CardContent className="p-0">
+                          <div
+                            className="flex items-start py-2 px-3 cursor-pointer gap-2"
+                            onClick={() => toggleEventSelection(event.id)}
+                          >
+                            <div className="text-lg mt-1" aria-hidden="true">
+                              {getEventEmoji(event.type)}
+                            </div>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
+                              {format(new Date(event.created_at), "MMM d, HH:mm")}
+                            </span>
+                            <img
+                              src={event.actor.avatar_url}
+                              alt={`${event.actor.login}'s avatar`}
+                              className="w-5 h-5 rounded-full mt-1"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                window.open(event.actor.url, '_blank')
+                              }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-start gap-2">
+                                <a
+                                  href={getEventUrl(event)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm font-medium hover:underline truncate"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {eventInfo.summary}
+                                </a>
+                              </div>
+                              {eventInfo.title && (
+                                <div className="text-xs text-muted-foreground truncate mt-0.5">
+                                  {eventInfo.title}
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="ml-auto h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleEventExpansion(event.id)
+                              }}
+                            >
+                              {expandedEvents.has(event.id) ? (
+                                <ChevronUp className="h-3 w-3" />
+                              ) : (
+                                <ChevronDown className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
+
+                          {expandedEvents.has(event.id) && (
+                            <div className="px-3 pb-2 pt-0">
+                              <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
+                                <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              ))
+            ) : (
+              // Timeline view
+              groupRelatedEventsForTimeline(events).map((event) => {
+                const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
+                const eventInfo = getEventSummary(event, relatedEvents)
+                return (
+                  <Card
+                    key={event.id}
+                    className={cn(
+                      "overflow-hidden transition-all",
+                      selectedEvents.has(event.id) && "border-primary",
+                      relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
+                    )}
+                  >
+                    <CardContent className="p-0">
+                      <div
+                        className="flex items-start py-2 px-3 cursor-pointer gap-2"
+                        onClick={() => toggleEventSelection(event.id)}
+                      >
+                        <div className="text-lg mt-1" aria-hidden="true">
+                          {getEventEmoji(event.type)}
+                        </div>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
+                          {format(new Date(event.created_at), "MMM d, HH:mm")}
+                        </span>
+                        <img
+                          src={event.actor.avatar_url}
+                          alt={`${event.actor.login}'s avatar`}
+                          className="w-5 h-5 rounded-full mt-1"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            window.open(event.actor.url, '_blank')
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-start gap-2">
+                            <a
+                              href={getEventUrl(event)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-medium hover:underline truncate"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {eventInfo.summary}
+                            </a>
+                          </div>
+                          {eventInfo.title && (
+                            <div className="text-xs text-muted-foreground truncate mt-0.5">
+                              {eventInfo.title}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto h-6 w-6 p-0"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleEventExpansion(event.id)
+                          }}
+                        >
+                          {expandedEvents.has(event.id) ? (
+                            <ChevronUp className="h-3 w-3" />
+                          ) : (
+                            <ChevronDown className="h-3 w-3" />
+                          )}
+                        </Button>
+                      </div>
+
+                      {expandedEvents.has(event.id) && (
+                        <div className="px-3 pb-2 pt-0">
+                          <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
+                            <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })
+            )}
           </div>
         </>
       )}
