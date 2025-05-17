@@ -31,15 +31,51 @@ interface GitHubEvent {
   payload: any
 }
 
+// Add event category type
+type EventCategory = "PR" | "Issue" | "Other"
+
 // Update the UserPreferences interface to include selectedEvents and expandedEvents
 interface UserPreferences {
   username: string
   startDate: string
   endDate: string
-  viewMode: "compact" | "expanded"
   selectedEvents: string[]
   expandedEvents: string[]
   lastTheme: string
+}
+
+// Add function to categorize events
+const getEventCategory = (event: GitHubEvent): EventCategory => {
+  const prEvents = [
+    "PullRequestEvent",
+    "PullRequestReviewEvent",
+    "PullRequestReviewCommentEvent",
+    "PushEvent"
+  ]
+  
+  const issueEvents = [
+    "IssuesEvent",
+    "IssueCommentEvent"
+  ]
+
+  if (prEvents.includes(event.type)) {
+    return "PR"
+  } else if (issueEvents.includes(event.type)) {
+    return "Issue"
+  }
+  return "Other"
+}
+
+// Add function to group events by category
+const groupEventsByCategory = (events: GitHubEvent[]) => {
+  return events.reduce((acc, event) => {
+    const category = getEventCategory(event)
+    if (!acc[category]) {
+      acc[category] = []
+    }
+    acc[category].push(event)
+    return acc
+  }, {} as Record<EventCategory, GitHubEvent[]>)
 }
 
 export default function GitHubEventViewer() {
@@ -52,13 +88,11 @@ export default function GitHubEventViewer() {
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set())
-  const [viewMode, setViewMode] = useState<"compact" | "expanded">("compact")
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
 
   // Load user preferences from localStorage on mount
-  // Update the useEffect that loads preferences to include all values
   useEffect(() => {
     const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
     if (savedPrefs) {
@@ -67,7 +101,6 @@ export default function GitHubEventViewer() {
         setUsername(prefs.username || "")
         setStartDate(prefs.startDate ? new Date(prefs.startDate) : subDays(new Date(), 4))
         setEndDate(prefs.endDate ? new Date(prefs.endDate) : new Date())
-        setViewMode(prefs.viewMode || "compact")
 
         // Restore selected and expanded events
         if (prefs.selectedEvents) {
@@ -99,19 +132,17 @@ export default function GitHubEventViewer() {
   }, [])
 
   // Save preferences to localStorage when they change
-  // Update the useEffect that saves preferences to include all values
   useEffect(() => {
     const prefs: UserPreferences = {
       username,
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
-      viewMode,
       selectedEvents: Array.from(selectedEvents),
       expandedEvents: Array.from(expandedEvents),
       lastTheme: theme || "system",
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
-  }, [username, startDate, endDate, viewMode, selectedEvents, expandedEvents, theme])
+  }, [username, startDate, endDate, selectedEvents, expandedEvents, theme])
 
   // Fetch events from GitHub API
   const fetchEvents = async () => {
@@ -301,25 +332,55 @@ export default function GitHubEventViewer() {
 
     switch (event.type) {
       case "CreateEvent":
-        return `${actor} created ${event.payload.ref_type} ${event.payload.ref || ""} in ${repo}`
+        return {
+          summary: `${actor} created ${event.payload.ref_type} ${event.payload.ref || ""} in ${repo}`,
+          title: event.payload.ref || ""
+        }
       case "PushEvent":
-        return `${actor} pushed ${event.payload.size} commit(s) to ${repo}`
+        return {
+          summary: `${actor} pushed ${event.payload.size} commit(s) to ${repo}`,
+          title: event.payload.head || ""
+        }
       case "IssuesEvent":
-        return `${actor} ${event.payload.action} issue in ${repo}`
+        return {
+          summary: `${actor} ${event.payload.action} issue in ${repo}`,
+          title: `#${event.payload.issue?.number} ${event.payload.issue?.title || ""}`
+        }
       case "PullRequestEvent":
-        return `${actor} ${event.payload.action} pull request in ${repo}`
+        return {
+          summary: `${actor} ${event.payload.action} pull request in ${repo}`,
+          title: `#${event.payload.pull_request?.number} ${event.payload.pull_request?.title || ""}`
+        }
       case "IssueCommentEvent":
-        return `${actor} commented on issue in ${repo}`
+        return {
+          summary: `${actor} commented on issue in ${repo}`,
+          title: `#${event.payload.issue?.number} ${event.payload.issue?.title || ""}`
+        }
       case "WatchEvent":
-        return `${actor} starred ${repo}`
+        return {
+          summary: `${actor} starred ${repo}`,
+          title: ""
+        }
       case "ForkEvent":
-        return `${actor} forked ${repo}`
+        return {
+          summary: `${actor} forked ${repo}`,
+          title: ""
+        }
       case "DeleteEvent":
-        return `${actor} deleted ${event.payload.ref_type} ${event.payload.ref} in ${repo}`
+        return {
+          summary: `${actor} deleted ${event.payload.ref_type} ${event.payload.ref} in ${repo}`,
+          title: event.payload.ref || ""
+        }
       case "ReleaseEvent":
-        return `${actor} released ${event.payload.release?.name || "a new version"} in ${repo}`
+        return {
+          summary: `${actor} released ${event.payload.release?.name || "a new version"} in ${repo}`,
+          title: event.payload.release?.name || ""
+        }
       default:
-        return `${actor} performed ${event.type.replace("Event", "")} on ${repo}`
+        return {
+          summary: `${actor} performed ${event.type.replace("Event", "")} on ${repo}`,
+          title: ""
+        }
     }
   }
 
@@ -466,17 +527,10 @@ export default function GitHubEventViewer() {
 
       {events.length > 0 && (
         <>
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={selectAllEvents}>
                 {selectedEvents.size === events.length ? "Deselect All" : "Select All"}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setViewMode(viewMode === "compact" ? "expanded" : "compact")}
-              >
-                {viewMode === "compact" ? "Expanded View" : "Compact View"}
               </Button>
             </div>
             <Button onClick={exportEvents} size="sm" className="flex items-center gap-2">
@@ -486,62 +540,78 @@ export default function GitHubEventViewer() {
           </div>
 
           <div className="space-y-3">
-            {events.map((event) => (
-              <Card
-                key={event.id}
-                className={cn("overflow-hidden transition-all", selectedEvents.has(event.id) && "border-primary")}
-              >
-                <CardContent className="p-0">
-                  <div
-                    className={cn("flex items-start p-4 cursor-pointer", viewMode === "compact" ? "gap-2" : "gap-4")}
-                    onClick={() => toggleEventSelection(event.id)}
-                  >
-                    <div className="text-2xl" aria-hidden="true">
-                      {getEventEmoji(event.type)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start gap-2">
-                        <a
-                          href={getEventUrl(event)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium hover:underline"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {getEventSummary(event)}
-                        </a>
-                        <span className="text-sm text-muted-foreground whitespace-nowrap">
-                          {format(new Date(event.created_at), "MMM d, HH:mm")}
-                        </span>
-                      </div>
-                      <div className="text-sm text-muted-foreground truncate">{event.type}</div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        toggleEventExpansion(event.id)
-                      }}
+            {Object.entries(groupEventsByCategory(events)).map(([category, categoryEvents]) => (
+              <div key={category} className="space-y-1">
+                <h2 className="text-sm font-semibold text-muted-foreground">
+                  {category === "PR" ? "Pull Request Activity" : 
+                   category === "Issue" ? "Issue Activity" : 
+                   "Other Activity"} ({categoryEvents.length})
+                </h2>
+                {categoryEvents.map((event) => {
+                  const eventInfo = getEventSummary(event)
+                  return (
+                    <Card
+                      key={event.id}
+                      className={cn("overflow-hidden transition-all", selectedEvents.has(event.id) && "border-primary")}
                     >
-                      {expandedEvents.has(event.id) ? (
-                        <ChevronUp className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
+                      <CardContent className="p-0">
+                        <div
+                          className="flex items-start py-2 px-3 cursor-pointer gap-2"
+                          onClick={() => toggleEventSelection(event.id)}
+                        >
+                          <div className="text-lg mt-1" aria-hidden="true">
+                            {getEventEmoji(event.type)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start gap-2">
+                              <a
+                                href={getEventUrl(event)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm font-medium hover:underline truncate"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {eventInfo.summary}
+                              </a>
+                              <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                                {format(new Date(event.created_at), "MMM d, HH:mm")}
+                              </span>
+                            </div>
+                            {eventInfo.title && (
+                              <div className="text-xs text-muted-foreground truncate mt-0.5">
+                                {eventInfo.title}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="ml-auto h-6 w-6 p-0"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleEventExpansion(event.id)
+                            }}
+                          >
+                            {expandedEvents.has(event.id) ? (
+                              <ChevronUp className="h-3 w-3" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3" />
+                            )}
+                          </Button>
+                        </div>
 
-                  {expandedEvents.has(event.id) && (
-                    <div className="px-4 pb-4 pt-0">
-                      <div className="bg-muted p-3 rounded-md overflow-auto max-h-96">
-                        <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                        {expandedEvents.has(event.id) && (
+                          <div className="px-3 pb-2 pt-0">
+                            <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
+                              <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
             ))}
           </div>
         </>
