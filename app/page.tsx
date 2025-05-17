@@ -13,6 +13,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { useToast } from "@/hooks/use-toast"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
+import ReactMarkdown from "react-markdown"
 
 // Types
 interface GitHubEvent {
@@ -262,6 +263,225 @@ const findPRReferences = (commitMessage: string, repo: string): { number: number
   return null
 }
 
+// Get human-friendly summary for event
+const getEventSummary = (event: GitHubEvent, relatedEvents?: RelatedEvents) => {
+  const actor = event.actor.login
+  const repo = event.repo.name
+
+  switch (event.type) {
+    case "CreateEvent":
+      return {
+        summary: `${actor} created ${event.payload.ref_type} ${event.payload.ref || ""} in ${repo}`,
+        title: event.payload.ref || ""
+      }
+    case "PushEvent": {
+      const commits = (event.payload.commits || []) as Commit[]
+      const prRefs = commits
+        .map(commit => findPRReferences(commit.message, repo))
+        .filter((ref): ref is { number: number; url: string } => ref !== null)
+      
+      const prInfo = prRefs.length > 0 
+        ? `PR #${prRefs.map(ref => ref.number).join(", #")}`
+        : event.payload.head || ""
+
+      return {
+        summary: `${actor} pushed ${event.payload.size} commit(s) to ${repo}`,
+        title: prInfo
+      }
+    }
+    case "IssuesEvent":
+      const issueNumber = event.payload.issue?.number
+      const issueTitle = event.payload.issue?.title || ""
+      const closedByPR = relatedEvents?.pr
+      return {
+        summary: `${actor} ${event.payload.action} issue in ${repo}`,
+        title: `#${issueNumber} ${issueTitle}${closedByPR ? ` (closed by PR #${closedByPR.payload.pull_request.number})` : ""}`
+      }
+    case "PullRequestEvent":
+      const prNumber = event.payload.pull_request?.number
+      const prTitle = event.payload.pull_request?.title || ""
+      const closesIssue = relatedEvents?.issue
+      return {
+        summary: `${actor} ${event.payload.action} pull request in ${repo}`,
+        title: `#${prNumber} ${prTitle}${closesIssue ? ` (closes issue #${closesIssue.payload.issue.number})` : ""}`
+      }
+    case "PullRequestReviewEvent":
+      const reviewPrNumber = event.payload.pull_request?.number
+      const reviewPrTitle = event.payload.pull_request?.title || ""
+      return {
+        summary: `${actor} ${event.payload.action} review on pull request in ${repo}`,
+        title: `#${reviewPrNumber} ${reviewPrTitle}`
+      }
+    case "IssueCommentEvent":
+      return {
+        summary: `${actor} commented on issue in ${repo}`,
+        title: `#${event.payload.issue?.number} ${event.payload.issue?.title || ""}`
+      }
+    case "WatchEvent":
+      return {
+        summary: `${actor} starred ${repo}`,
+        title: ""
+      }
+    case "ForkEvent":
+      return {
+        summary: `${actor} forked ${repo}`,
+        title: ""
+      }
+    case "DeleteEvent":
+      return {
+        summary: `${actor} deleted ${event.payload.ref_type} ${event.payload.ref} in ${repo}`,
+        title: event.payload.ref || ""
+      }
+    case "ReleaseEvent":
+      return {
+        summary: `${actor} released ${event.payload.release?.name || "a new version"} in ${repo}`,
+        title: event.payload.release?.name || ""
+      }
+    default:
+      return {
+        summary: `${actor} performed ${event.type.replace("Event", "")} on ${repo}`,
+        title: ""
+      }
+  }
+}
+
+// Add function to generate report
+const generateReport = (events: GitHubEvent[]) => {
+  const groups = groupEventsByCategoryAndNumber(events)
+  const report: string[] = []
+
+  // PRs section
+  const prGroups = Object.entries(groups.PR)
+    .filter(([key]) => key !== 'other')
+    .map(([key, group]) => {
+      const activities = group.events.map(event => {
+        const eventInfo = getEventSummary(event)
+        // Remove actor name if it's the same for all events
+        const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
+        return allSameActor 
+          ? eventInfo.summary.replace(`${event.actor.login} `, '')
+          : eventInfo.summary
+      }).join(', ')
+      return { key, group, activities }
+    })
+
+  if (prGroups.length > 0) {
+    report.push('## Pull Requests\n')
+
+    // Opened PRs
+    const openedPRs = prGroups.filter(({ activities }) => 
+      activities.includes('opened pull request') || 
+      activities.includes('created pull request')
+    )
+    if (openedPRs.length > 0) {
+      report.push('### Opened\n')
+      report.push(...openedPRs.map(({ key, group }) => 
+        `* [${group.title}](${group.url}) (${key})`
+      ))
+      report.push('')
+    }
+
+    // Reviewed PRs
+    const reviewedPRs = prGroups.filter(({ activities }) => 
+      activities.includes('reviewed') || 
+      activities.includes('commented on pull request')
+    )
+    if (reviewedPRs.length > 0) {
+      report.push('### Reviewed\n')
+      report.push(...reviewedPRs.map(({ key, group }) => 
+        `* [${group.title}](${group.url}) (${key})`
+      ))
+      report.push('')
+    }
+
+    // Closed PRs
+    const closedPRs = prGroups.filter(({ activities }) => 
+      activities.includes('closed pull request') || 
+      activities.includes('merged pull request')
+    )
+    if (closedPRs.length > 0) {
+      report.push('### Closed\n')
+      report.push(...closedPRs.map(({ key, group }) => 
+        `* [${group.title}](${group.url}) (${key})`
+      ))
+      report.push('')
+    }
+  }
+
+  // Issues section
+  const issueGroups = Object.entries(groups.Issue)
+    .filter(([key]) => key !== 'other')
+    .map(([key, group]) => {
+      const activities = group.events.map(event => {
+        const eventInfo = getEventSummary(event)
+        // Remove actor name if it's the same for all events
+        const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
+        return allSameActor 
+          ? eventInfo.summary.replace(`${event.actor.login} `, '')
+          : eventInfo.summary
+      }).join(', ')
+      return { key, group, activities }
+    })
+
+  if (issueGroups.length > 0) {
+    report.push('## Issues\n')
+
+    // Opened Issues
+    const openedIssues = issueGroups.filter(({ activities }) => 
+      activities.includes('opened issue') || 
+      activities.includes('created issue')
+    )
+    if (openedIssues.length > 0) {
+      report.push('### Opened\n')
+      report.push(...openedIssues.map(({ key, group }) => 
+        `* [${group.title}](${group.url}) (${key})`
+      ))
+      report.push('')
+    }
+
+    // Commented Issues
+    const commentedIssues = issueGroups.filter(({ activities }) => 
+      activities.includes('commented on issue')
+    )
+    if (commentedIssues.length > 0) {
+      report.push('### Commented\n')
+      report.push(...commentedIssues.map(({ key, group }) => 
+        `* [${group.title}](${group.url}) (${key})`
+      ))
+      report.push('')
+    }
+
+    // Closed Issues
+    const closedIssues = issueGroups.filter(({ activities }) => 
+      activities.includes('closed issue')
+    )
+    if (closedIssues.length > 0) {
+      report.push('### Closed\n')
+      report.push(...closedIssues.map(({ key, group }) => 
+        `* [${group.title}](${group.url}) (${key})`
+      ))
+      report.push('')
+    }
+  }
+
+  // Other section
+  const otherEvents = groups.Other.other.events.map(event => {
+    const eventInfo = getEventSummary(event)
+    // Remove actor name if it's the same for all events
+    const allSameActor = groups.Other.other.events.every(e => e.actor.login === event.actor.login)
+    return allSameActor 
+      ? eventInfo.summary.replace(`${event.actor.login} `, '')
+      : eventInfo.summary
+  })
+
+  if (otherEvents.length > 0) {
+    report.push('## Other Activity\n')
+    report.push(...otherEvents.map(event => `* ${event}`))
+  }
+
+  return report.join('\n')
+}
+
 export default function GitHubEventViewer() {
   // State
   const [events, setEvents] = useState<GitHubEvent[]>([])
@@ -274,6 +494,8 @@ export default function GitHubEventViewer() {
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<ViewMode>("grouped")
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
+  const [showReport, setShowReport] = useState(false)
+  const [showReportPreview, setShowReportPreview] = useState(false)
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -515,88 +737,6 @@ export default function GitHubEventViewer() {
     }
   }
 
-  // Get human-friendly summary for event
-  const getEventSummary = (event: GitHubEvent, relatedEvents?: RelatedEvents) => {
-    const actor = event.actor.login
-    const repo = event.repo.name
-
-    switch (event.type) {
-      case "CreateEvent":
-        return {
-          summary: `${actor} created ${event.payload.ref_type} ${event.payload.ref || ""} in ${repo}`,
-          title: event.payload.ref || ""
-        }
-      case "PushEvent": {
-        const commits = (event.payload.commits || []) as Commit[]
-        const prRefs = commits
-          .map(commit => findPRReferences(commit.message, repo))
-          .filter((ref): ref is { number: number; url: string } => ref !== null)
-        
-        const prInfo = prRefs.length > 0 
-          ? `PR #${prRefs.map(ref => ref.number).join(", #")}`
-          : event.payload.head || ""
-
-        return {
-          summary: `${actor} pushed ${event.payload.size} commit(s) to ${repo}`,
-          title: prInfo
-        }
-      }
-      case "IssuesEvent":
-        const issueNumber = event.payload.issue?.number
-        const issueTitle = event.payload.issue?.title || ""
-        const closedByPR = relatedEvents?.pr
-        return {
-          summary: `${actor} ${event.payload.action} issue in ${repo}`,
-          title: `#${issueNumber} ${issueTitle}${closedByPR ? ` (closed by PR #${closedByPR.payload.pull_request.number})` : ""}`
-        }
-      case "PullRequestEvent":
-        const prNumber = event.payload.pull_request?.number
-        const prTitle = event.payload.pull_request?.title || ""
-        const closesIssue = relatedEvents?.issue
-        return {
-          summary: `${actor} ${event.payload.action} pull request in ${repo}`,
-          title: `#${prNumber} ${prTitle}${closesIssue ? ` (closes issue #${closesIssue.payload.issue.number})` : ""}`
-        }
-      case "PullRequestReviewEvent":
-        const reviewPrNumber = event.payload.pull_request?.number
-        const reviewPrTitle = event.payload.pull_request?.title || ""
-        return {
-          summary: `${actor} ${event.payload.action} review on pull request in ${repo}`,
-          title: `#${reviewPrNumber} ${reviewPrTitle}`
-        }
-      case "IssueCommentEvent":
-        return {
-          summary: `${actor} commented on issue in ${repo}`,
-          title: `#${event.payload.issue?.number} ${event.payload.issue?.title || ""}`
-        }
-      case "WatchEvent":
-        return {
-          summary: `${actor} starred ${repo}`,
-          title: ""
-        }
-      case "ForkEvent":
-        return {
-          summary: `${actor} forked ${repo}`,
-          title: ""
-        }
-      case "DeleteEvent":
-        return {
-          summary: `${actor} deleted ${event.payload.ref_type} ${event.payload.ref} in ${repo}`,
-          title: event.payload.ref || ""
-        }
-      case "ReleaseEvent":
-        return {
-          summary: `${actor} released ${event.payload.release?.name || "a new version"} in ${repo}`,
-          title: event.payload.release?.name || ""
-        }
-      default:
-        return {
-          summary: `${actor} performed ${event.type.replace("Event", "")} on ${repo}`,
-          title: ""
-        }
-    }
-  }
-
   // Get URL for event
   const getEventUrl = (event: GitHubEvent) => {
     const repoUrl = `https://github.com/${event.repo.name}`
@@ -666,10 +806,16 @@ export default function GitHubEventViewer() {
             </span>
           )}
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowReportPreview(true)}
+          >
+            Preview Report
+          </Button>
+          <Button
             variant="ghost"
             size="icon"
             onClick={() => {
-              // Simply toggle between light and dark
               const newTheme = theme === "dark" ? "light" : "dark"
               setTheme(newTheme)
             }}
@@ -998,6 +1144,58 @@ export default function GitHubEventViewer() {
       {!username && (
         <div className="text-center py-12">
           <p className="text-muted-foreground">Enter a GitHub username to view events.</p>
+        </div>
+      )}
+
+      {/* Report Preview Modal */}
+      {showReportPreview && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg shadow-lg w-full max-w-3xl max-h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-lg font-semibold">Report Preview</h2>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const report = generateReport(getFilteredEvents(events))
+                    navigator.clipboard.writeText(report)
+                    toast({
+                      title: "Report copied",
+                      description: "The report has been copied to your clipboard",
+                    })
+                  }}
+                >
+                  Copy
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowReportPreview(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="p-4 overflow-auto">
+              <div className="prose dark:prose-invert max-w-none">
+                <ReactMarkdown
+                  components={{
+                    ul: ({ children }) => <ul className="list-disc pl-4">{children}</ul>,
+                    li: ({ children }) => <li className="my-1">{children}</li>,
+                    h2: ({ children }) => <h2 className="text-xl font-bold mt-4 mb-2">{children}</h2>,
+                    a: ({ href, children }) => (
+                      <a href={href} className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer">
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {generateReport(getFilteredEvents(events))}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
