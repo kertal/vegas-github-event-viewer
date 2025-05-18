@@ -36,7 +36,7 @@ interface GitHubEvent {
 type EventCategory = "Pull Requests" | "Issues" | "Commits" | "Repository" | "Other"
 
 // Add view mode type
-type ViewMode = "grouped" | "timeline"
+type ViewMode = "grouped" | "timeline" | "report"
 
 // Add event type constants
 const EVENT_TYPES: Record<EventCategory, string[]> = {
@@ -391,7 +391,6 @@ const generateReport = (events: GitHubEvent[]) => {
     .map(([key, group]) => {
       const activities = group.events.map(event => {
         const eventInfo = getEventSummary(event)
-        // Remove actor name if it's the same for all events
         const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
         return allSameActor 
           ? eventInfo.summary.replace(`${event.actor.login} `, '')
@@ -401,7 +400,7 @@ const generateReport = (events: GitHubEvent[]) => {
     })
 
   if (prGroups.length > 0) {
-    report.push('## Pull Requests\n')
+    report.push('* Pull Requests')
 
     // Opened PRs
     const openedPRs = prGroups.filter(({ activities }) => 
@@ -409,11 +408,10 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('created pull request')
     )
     if (openedPRs.length > 0) {
-      report.push('### Opened\n')
+      report.push('  * Opened')
       report.push(...openedPRs.map(({ key, group }) => 
-        `* [${group.title}](${group.url}) (${key})`
+        `    * [${group.title}](${group.url}) (${key})`
       ))
-      report.push('')
     }
 
     // Reviewed PRs
@@ -422,11 +420,10 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('commented on pull request')
     )
     if (reviewedPRs.length > 0) {
-      report.push('### Reviewed\n')
+      report.push('  * Reviewed')
       report.push(...reviewedPRs.map(({ key, group }) => 
-        `* [${group.title}](${group.url}) (${key})`
+        `    * [${group.title}](${group.url}) (${key})`
       ))
-      report.push('')
     }
 
     // Closed PRs
@@ -435,11 +432,10 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('merged pull request')
     )
     if (closedPRs.length > 0) {
-      report.push('### Closed\n')
+      report.push('  * Closed')
       report.push(...closedPRs.map(({ key, group }) => 
-        `* [${group.title}](${group.url}) (${key})`
+        `    * [${group.title}](${group.url}) (${key})`
       ))
-      report.push('')
     }
   }
 
@@ -449,7 +445,6 @@ const generateReport = (events: GitHubEvent[]) => {
     .map(([key, group]) => {
       const activities = group.events.map(event => {
         const eventInfo = getEventSummary(event)
-        // Remove actor name if it's the same for all events
         const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
         return allSameActor 
           ? eventInfo.summary.replace(`${event.actor.login} `, '')
@@ -459,7 +454,7 @@ const generateReport = (events: GitHubEvent[]) => {
     })
 
   if (issueGroups.length > 0) {
-    report.push('## Issues\n')
+    report.push('* Issues')
 
     // Opened Issues
     const openedIssues = issueGroups.filter(({ activities }) => 
@@ -467,11 +462,10 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('created issue')
     )
     if (openedIssues.length > 0) {
-      report.push('### Opened\n')
+      report.push('  * Opened')
       report.push(...openedIssues.map(({ key, group }) => 
-        `* [${group.title}](${group.url}) (${key})`
+        `    * [${group.title}](${group.url}) (${key})`
       ))
-      report.push('')
     }
 
     // Commented Issues
@@ -479,11 +473,10 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('commented on issue')
     )
     if (commentedIssues.length > 0) {
-      report.push('### Commented\n')
+      report.push('  * Commented')
       report.push(...commentedIssues.map(({ key, group }) => 
-        `* [${group.title}](${group.url}) (${key})`
+        `    * [${group.title}](${group.url}) (${key})`
       ))
-      report.push('')
     }
 
     // Closed Issues
@@ -491,18 +484,16 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('closed issue')
     )
     if (closedIssues.length > 0) {
-      report.push('### Closed\n')
+      report.push('  * Closed')
       report.push(...closedIssues.map(({ key, group }) => 
-        `* [${group.title}](${group.url}) (${key})`
+        `    * [${group.title}](${group.url}) (${key})`
       ))
-      report.push('')
     }
   }
 
   // Other section
   const otherEvents = groups["Other"].other.events.map(event => {
     const eventInfo = getEventSummary(event)
-    // Remove actor name if it's the same for all events
     const allSameActor = groups["Other"].other.events.every(e => e.actor.login === event.actor.login)
     return allSameActor 
       ? eventInfo.summary.replace(`${event.actor.login} `, '')
@@ -510,8 +501,8 @@ const generateReport = (events: GitHubEvent[]) => {
   })
 
   if (otherEvents.length > 0) {
-    report.push('## Other Activity\n')
-    report.push(...otherEvents.map(event => `* ${event}`))
+    report.push('* Other Activity')
+    report.push(...otherEvents.map(event => `  * ${event}`))
   }
 
   return report.join('\n')
@@ -1219,11 +1210,39 @@ export default function GitHubEventViewer() {
                   variant={viewMode === "timeline" ? "default" : "ghost"}
                   size="sm"
                   onClick={() => setViewMode("timeline")}
-                  className="rounded-l-none"
+                  className="rounded-none border-r"
                 >
                   Timeline
                 </Button>
+                <Button
+                  variant={viewMode === "report" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setViewMode("report")}
+                  className="rounded-l-none"
+                >
+                  Report
+                </Button>
               </div>
+              {viewMode === "report" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-2"
+                  onClick={() => {
+                    const eventsToExport = getFilteredEvents(events).filter((event) => 
+                      selectedEvents.size === 0 || selectedEvents.has(event.id)
+                    )
+                    const report = generateReport(eventsToExport)
+                    navigator.clipboard.writeText(report)
+                    toast({
+                      title: "Report copied",
+                      description: "The report has been copied to your clipboard",
+                    })
+                  }}
+                >
+                  Copy
+                </Button>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {selectedEvents.size > 0 && (
@@ -1231,14 +1250,6 @@ export default function GitHubEventViewer() {
                   Deselect All
                 </Button>
               )}
-              <Button 
-                onClick={() => setShowReportPreview(true)} 
-                size="sm" 
-                className="flex items-center gap-2"
-              >
-                <ClipboardCopy className="h-4 w-4" />
-                Generate Report {selectedEvents.size > 0 ? `(${selectedEvents.size})` : `(${getFilteredEvents(events).length})`}
-              </Button>
             </div>
           </div>
 
@@ -1352,7 +1363,7 @@ export default function GitHubEventViewer() {
                       ))}
                   </div>
                 ))
-            ) : (
+            ) : viewMode === "timeline" ? (
               // Timeline view
               groupRelatedEventsForTimeline(getFilteredEvents(events)).map((event) => {
                 const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
@@ -1432,6 +1443,88 @@ export default function GitHubEventViewer() {
                   </Card>
                 )
               })
+            ) : (
+              // Report view
+              <div className="prose dark:prose-invert max-w-none">
+                {(() => {
+                  const eventsToExport = getFilteredEvents(events).filter((event) => 
+                    selectedEvents.size === 0 || selectedEvents.has(event.id)
+                  )
+                  
+                  // Get unique actors and their avatars
+                  const actors = new Map<string, string>()
+                  eventsToExport.forEach(event => {
+                    if (!actors.has(event.actor.login)) {
+                      actors.set(event.actor.login, event.actor.avatar_url)
+                    }
+                  })
+
+                  return (
+                    <>
+                      <div className="text-sm text-muted-foreground mb-4">
+                        Time Range: {format(startDate, "MMM d, yyyy HH:mm")} - {format(endDate, "MMM d, yyyy HH:mm")}
+                      </div>
+                      {actors.size > 1 && (
+                        <>
+                          <h2 className="text-sm font-semibold text-muted-foreground mt-6 mb-2">Involved People</h2>
+                          <div className="flex gap-2 items-center mb-4">
+                            {Array.from(actors.entries()).map(([login, avatarUrl]) => (
+                              <img
+                                key={login}
+                                src={avatarUrl}
+                                alt={login}
+                                className="w-6 h-6 rounded-full"
+                                title={login}
+                                onClick={() => window.open(`https://github.com/${login}`, '_blank')}
+                                style={{ cursor: 'pointer' }}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      <ReactMarkdown
+                        components={{
+                          ul: ({ children }) => (
+                            <ul className="list-disc pl-4 text-sm">
+                              {children}
+                            </ul>
+                          ),
+                          li: ({ children }) => (
+                            <li className="my-1">
+                              {children}
+                            </li>
+                          ),
+                          h2: ({ children }) => (
+                            <h2 className="text-sm font-semibold text-muted-foreground mt-6 mb-2">
+                              {children}
+                            </h2>
+                          ),
+                          h3: ({ children }) => (
+                            <h3 className="text-sm font-semibold text-muted-foreground mt-4 mb-2">
+                              {children}
+                            </h3>
+                          ),
+                          a: ({ href, children }) => (
+                            <a 
+                              href={href} 
+                              className="text-sm font-medium hover:underline" 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                            >
+                              {children}
+                            </a>
+                          ),
+                          p: ({ children }) => (
+                            <p className="text-sm">{children}</p>
+                          ),
+                        }}
+                      >
+                        {generateReport(eventsToExport)}
+                      </ReactMarkdown>
+                    </>
+                  )
+                })()}
+              </div>
             )}
           </div>
         </>
@@ -1446,65 +1539,6 @@ export default function GitHubEventViewer() {
       {!usernames.length && (
         <div className="text-center py-12">
           <p className="text-muted-foreground">Enter GitHub usernames to view events.</p>
-        </div>
-      )}
-
-      {/* Report Preview Modal */}
-      {showReportPreview && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg shadow-lg w-full max-w-3xl max-h-[80vh] flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-lg font-semibold">
-                Report Preview {selectedEvents.size > 0 ? `(${selectedEvents.size} selected)` : `(${getFilteredEvents(events).length} events)`}
-              </h2>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const eventsToExport = getFilteredEvents(events).filter((event) => 
-                      selectedEvents.size === 0 || selectedEvents.has(event.id)
-                    )
-                    const report = generateReport(eventsToExport)
-                    navigator.clipboard.writeText(report)
-                    toast({
-                      title: "Report copied",
-                      description: "The report has been copied to your clipboard",
-                    })
-                  }}
-                >
-                  Copy
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowReportPreview(false)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-            <div className="p-4 overflow-auto">
-              <div className="prose dark:prose-invert max-w-none">
-                <ReactMarkdown
-                  components={{
-                    ul: ({ children }) => <ul className="list-disc pl-4">{children}</ul>,
-                    li: ({ children }) => <li className="my-1">{children}</li>,
-                    h2: ({ children }) => <h2 className="text-xl font-bold mt-4 mb-2">{children}</h2>,
-                    a: ({ href, children }) => (
-                      <a href={href} className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer">
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {generateReport(getFilteredEvents(events).filter((event) => 
-                    selectedEvents.size === 0 || selectedEvents.has(event.id)
-                  ))}
-                </ReactMarkdown>
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </div>
