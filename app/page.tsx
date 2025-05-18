@@ -79,6 +79,7 @@ interface UserPreferences {
   viewMode: ViewMode
   selectedRepos: string[]
   selectedEventTypes: string[]
+  showFilters: boolean
 }
 
 // Add interface for related events
@@ -531,6 +532,7 @@ export default function GitHubEventViewer() {
   const [showReport, setShowReport] = useState(false)
   const [showReportPreview, setShowReportPreview] = useState(false)
   const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
+  const [showFilters, setShowFilters] = useState(true)
   const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
 
   const { theme, setTheme } = useTheme()
@@ -549,6 +551,7 @@ export default function GitHubEventViewer() {
         setViewMode(prefs.viewMode || "grouped")
         setSelectedRepos(new Set(prefs.selectedRepos || []))
         setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
+        setShowFilters(prefs.showFilters !== undefined ? prefs.showFilters : true)
 
         // Restore selected and expanded events
         if (prefs.selectedEvents) {
@@ -591,9 +594,10 @@ export default function GitHubEventViewer() {
       viewMode,
       selectedRepos: Array.from(selectedRepos),
       selectedEventTypes: Array.from(selectedEventTypes),
+      showFilters,
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
-  }, [usernames, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes])
+  }, [usernames, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes, showFilters])
 
   // Fetch events from GitHub API
   const fetchEvents = async () => {
@@ -911,6 +915,25 @@ export default function GitHubEventViewer() {
     return filtered
   }
 
+  // Get count of active filters
+  const getActiveFilterCount = () => {
+    return selectedRepos.size + selectedEventTypes.size
+  }
+
+  // Get filter description
+  const getFilterDescription = () => {
+    if (getActiveFilterCount() === 0) return "No filters"
+    
+    const parts = []
+    if (selectedRepos.size > 0) {
+      parts.push(`${selectedRepos.size} repository${selectedRepos.size > 1 ? 'ies' : ''}`)
+    }
+    if (selectedEventTypes.size > 0) {
+      parts.push(`${selectedEventTypes.size} event type${selectedEventTypes.size > 1 ? 's' : ''}`)
+    }
+    return parts.join(', ')
+  }
+
   // Update the theme toggle button to use the saved theme
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -1021,37 +1044,55 @@ export default function GitHubEventViewer() {
             {events.length > 0 && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Repositories</label>
-                  <div className="flex flex-wrap gap-2">
-                    {getUniqueRepos(events).map(repo => (
-                      <Button
-                        key={repo}
-                        type="button"
-                        variant={selectedRepos.has(repo) ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => toggleRepoSelection(repo)}
-                      >
-                        {repo}
-                      </Button>
-                    ))}
+                  <label className="block text-sm font-medium mb-1">Filters</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowFilters(!showFilters)}
+                      className="flex items-center gap-2 w-full justify-between text-muted-foreground"
+                    >
+                      <span>{getFilterDescription()}</span>
+                      {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
                   </div>
-                </div>
+                  {showFilters && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Repositories</label>
+                        <div className="flex flex-wrap gap-2">
+                          {getUniqueRepos(events).map(repo => (
+                            <Button
+                              key={repo}
+                              type="button"
+                              variant={selectedRepos.has(repo) ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => toggleRepoSelection(repo)}
+                            >
+                              {repo}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1">Event Types</label>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(EVENT_TYPES).map(([category, types]) => (
-                      <Button
-                        key={category}
-                        type="button"
-                        variant={selectedEventTypes.has(category) ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => toggleEventTypeSelection(category as EventCategory)}
-                      >
-                        {category} ({events.filter(e => types.includes(e.type)).length})
-                      </Button>
-                    ))}
-                  </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Event Types</label>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(EVENT_TYPES).map(([category, types]) => (
+                            <Button
+                              key={category}
+                              type="button"
+                              variant={selectedEventTypes.has(category) ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => toggleEventTypeSelection(category as EventCategory)}
+                            >
+                              {category} ({events.filter(e => types.includes(e.type)).length})
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1102,109 +1143,113 @@ export default function GitHubEventViewer() {
           <div className="space-y-3">
             {viewMode === "grouped" ? (
               // Grouped view
-              Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events))).map(([category, numberGroups]) => (
-                <div key={category} className="space-y-3">
-                  <h2 className="text-sm font-semibold text-muted-foreground">
-                    {category === "Pull Requests" ? "Pull Request Activity" : 
-                     category === "Issues" ? "Issue Activity" : 
-                     "Other Activity"} ({Object.values(numberGroups).reduce((sum, group) => sum + group.events.length, 0)})
-                  </h2>
-                  {Object.entries(numberGroups).map(([number, group]) => (
-                    <div key={number} className="space-y-1">
-                      {number !== 'other' && (
-                        <div className="pl-2">
-                          <a
-                            href={group.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-medium text-muted-foreground hover:underline"
-                          >
-                            {number}: {group.title}
-                          </a>
-                        </div>
-                      )}
-                      {group.events.map((event) => {
-                        const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
-                        const eventInfo = getEventSummary(event, relatedEvents)
-                        return (
-                          <Card
-                            key={event.id}
-                            className={cn(
-                              "overflow-hidden transition-all",
-                              selectedEvents.has(event.id) && "border-primary",
-                              relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
-                            )}
-                          >
-                            <CardContent className="p-0">
-                              <div
-                                className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                                onClick={() => toggleEventSelection(event.id)}
+              Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events)))
+                .filter(([_, numberGroups]) => Object.values(numberGroups).some(group => group.events.length > 0))
+                .map(([category, numberGroups]) => (
+                  <div key={category} className="space-y-3">
+                    <h2 className="text-sm font-semibold text-muted-foreground">
+                      {category === "Pull Requests" ? "Pull Request Activity" : 
+                       category === "Issues" ? "Issue Activity" : 
+                       "Other Activity"} ({Object.values(numberGroups).reduce((sum, group) => sum + group.events.length, 0)})
+                    </h2>
+                    {Object.entries(numberGroups)
+                      .filter(([_, group]) => group.events.length > 0)
+                      .map(([number, group]) => (
+                        <div key={number} className="space-y-1">
+                          {number !== 'other' && (
+                            <div className="pl-2">
+                              <a
+                                href={group.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs font-medium text-muted-foreground hover:underline"
                               >
-                                <div className="text-lg mt-1" aria-hidden="true">
-                                  {getEventEmoji(event.type)}
-                                </div>
-                                <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
-                                  {format(new Date(event.created_at), "MMM d, HH:mm")}
-                                </span>
-                                <img
-                                  src={event.actor.avatar_url}
-                                  alt={`${event.actor.login}'s avatar`}
-                                  className="w-5 h-5 rounded-full mt-1"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    window.open(event.actor.url, '_blank')
-                                  }}
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex justify-between items-start gap-2">
-                                    <a
-                                      href={getEventUrl(event)}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-sm font-medium hover:underline truncate"
-                                      onClick={(e) => e.stopPropagation()}
+                                {number}: {group.title}
+                              </a>
+                            </div>
+                          )}
+                          {group.events.map((event) => {
+                            const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
+                            const eventInfo = getEventSummary(event, relatedEvents)
+                            return (
+                              <Card
+                                key={event.id}
+                                className={cn(
+                                  "overflow-hidden transition-all",
+                                  selectedEvents.has(event.id) && "border-primary",
+                                  relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
+                                )}
+                              >
+                                <CardContent className="p-0">
+                                  <div
+                                    className="flex items-start py-2 px-3 cursor-pointer gap-2"
+                                    onClick={() => toggleEventSelection(event.id)}
+                                  >
+                                    <div className="text-lg mt-1" aria-hidden="true">
+                                      {getEventEmoji(event.type)}
+                                    </div>
+                                    <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
+                                      {format(new Date(event.created_at), "MMM d, HH:mm")}
+                                    </span>
+                                    <img
+                                      src={event.actor.avatar_url}
+                                      alt={`${event.actor.login}'s avatar`}
+                                      className="w-5 h-5 rounded-full mt-1"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        window.open(event.actor.url, '_blank')
+                                      }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex justify-between items-start gap-2">
+                                        <a
+                                          href={getEventUrl(event)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-sm font-medium hover:underline truncate"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          {eventInfo.summary}
+                                        </a>
+                                      </div>
+                                      {eventInfo.title && number === 'other' && (
+                                        <div className="text-xs text-muted-foreground truncate mt-0.5">
+                                          {eventInfo.title}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="ml-auto h-6 w-6 p-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleEventExpansion(event.id)
+                                      }}
                                     >
-                                      {eventInfo.summary}
-                                    </a>
+                                      {expandedEvents.has(event.id) ? (
+                                        <ChevronUp className="h-3 w-3" />
+                                      ) : (
+                                        <ChevronDown className="h-3 w-3" />
+                                      )}
+                                    </Button>
                                   </div>
-                                  {eventInfo.title && number === 'other' && (
-                                    <div className="text-xs text-muted-foreground truncate mt-0.5">
-                                      {eventInfo.title}
+
+                                  {expandedEvents.has(event.id) && (
+                                    <div className="px-3 pb-2 pt-0">
+                                      <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
+                                        <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
+                                      </div>
                                     </div>
                                   )}
-                                </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="ml-auto h-6 w-6 p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    toggleEventExpansion(event.id)
-                                  }}
-                                >
-                                  {expandedEvents.has(event.id) ? (
-                                    <ChevronUp className="h-3 w-3" />
-                                  ) : (
-                                    <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </Button>
-                              </div>
-
-                              {expandedEvents.has(event.id) && (
-                                <div className="px-3 pb-2 pt-0">
-                                  <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
-                                    <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
-                                  </div>
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </div>
-              ))
+                                </CardContent>
+                              </Card>
+                            )
+                          })}
+                        </div>
+                      ))}
+                  </div>
+                ))
             ) : (
               // Timeline view
               groupRelatedEventsForTimeline(getFilteredEvents(events)).map((event) => {
