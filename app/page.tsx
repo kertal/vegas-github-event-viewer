@@ -33,14 +33,44 @@ interface GitHubEvent {
 }
 
 // Add event category type
-type EventCategory = "PR" | "Issue" | "Other"
+type EventCategory = "Pull Requests" | "Issues" | "Commits" | "Repository" | "Other"
 
 // Add view mode type
 type ViewMode = "grouped" | "timeline"
 
+// Add event type constants
+const EVENT_TYPES: Record<EventCategory, string[]> = {
+  "Pull Requests": [
+    "PullRequestEvent",
+    "PullRequestReviewEvent",
+    "PullRequestReviewCommentEvent"
+  ],
+  "Issues": [
+    "IssuesEvent",
+    "IssueCommentEvent"
+  ],
+  "Commits": [
+    "PushEvent"
+  ],
+  "Repository": [
+    "CreateEvent",
+    "DeleteEvent",
+    "ForkEvent",
+    "WatchEvent",
+    "ReleaseEvent",
+    "PublicEvent",
+    "MemberEvent",
+    "GollumEvent"
+  ],
+  "Other": [
+    "CommitCommentEvent",
+    "SecurityAdvisoryEvent"
+  ]
+}
+
 // Update the UserPreferences interface to include selectedEvents, expandedEvents, and viewMode
 interface UserPreferences {
-  username: string
+  usernames: string[]
   startDate: string
   endDate: string
   selectedEvents: string[]
@@ -48,6 +78,7 @@ interface UserPreferences {
   lastTheme: string
   viewMode: ViewMode
   selectedRepos: string[]
+  selectedEventTypes: string[]
 }
 
 // Add interface for related events
@@ -79,9 +110,9 @@ const getEventCategory = (event: GitHubEvent): EventCategory => {
   ]
 
   if (prEvents.includes(event.type)) {
-    return "PR"
+    return "Pull Requests"
   } else if (issueEvents.includes(event.type)) {
-    return "Issue"
+    return "Issues"
   }
   return "Other"
 }
@@ -102,55 +133,57 @@ const groupEventsByCategory = (events: GitHubEvent[]) => {
 const groupEventsByCategoryAndNumber = (events: GitHubEvent[]) => {
   const categoryGroups = groupEventsByCategory(events)
   const result: Record<EventCategory, Record<string, { events: GitHubEvent[], title: string, url: string }>> = {
-    PR: {},
-    Issue: {},
-    Other: {}
+    "Pull Requests": {},
+    "Issues": {},
+    "Commits": {},
+    "Repository": {},
+    "Other": {}
   }
 
   // Group PR events by PR number
-  categoryGroups.PR?.forEach(event => {
+  categoryGroups["Pull Requests"]?.forEach(event => {
     const prNumber = event.payload.pull_request?.number
     if (prNumber) {
       const key = `PR #${prNumber}`
-      if (!result.PR[key]) {
-        result.PR[key] = {
+      if (!result["Pull Requests"][key]) {
+        result["Pull Requests"][key] = {
           events: [],
           title: event.payload.pull_request?.title || "",
           url: event.payload.pull_request?.html_url || `https://github.com/${event.repo.name}/pull/${prNumber}`
         }
       }
-      result.PR[key].events.push(event)
+      result["Pull Requests"][key].events.push(event)
     } else {
-      if (!result.PR['other']) {
-        result.PR['other'] = { events: [], title: "", url: "" }
+      if (!result["Pull Requests"]['other']) {
+        result["Pull Requests"]['other'] = { events: [], title: "", url: "" }
       }
-      result.PR['other'].events.push(event)
+      result["Pull Requests"]['other'].events.push(event)
     }
   })
 
   // Group Issue events by issue number
-  categoryGroups.Issue?.forEach(event => {
+  categoryGroups["Issues"]?.forEach(event => {
     const issueNumber = event.payload.issue?.number
     if (issueNumber) {
       const key = `Issue #${issueNumber}`
-      if (!result.Issue[key]) {
-        result.Issue[key] = {
+      if (!result["Issues"][key]) {
+        result["Issues"][key] = {
           events: [],
           title: event.payload.issue?.title || "",
           url: event.payload.issue?.html_url || `https://github.com/${event.repo.name}/issues/${issueNumber}`
         }
       }
-      result.Issue[key].events.push(event)
+      result["Issues"][key].events.push(event)
     } else {
-      if (!result.Issue['other']) {
-        result.Issue['other'] = { events: [], title: "", url: "" }
+      if (!result["Issues"]['other']) {
+        result["Issues"]['other'] = { events: [], title: "", url: "" }
       }
-      result.Issue['other'].events.push(event)
+      result["Issues"]['other'].events.push(event)
     }
   })
 
   // Keep Other events as is
-  result.Other = { 'other': { events: categoryGroups.Other || [], title: "", url: "" } }
+  result["Other"] = { 'other': { events: categoryGroups["Other"] || [], title: "", url: "" } }
 
   return result
 }
@@ -351,7 +384,7 @@ const generateReport = (events: GitHubEvent[]) => {
   const report: string[] = []
 
   // PRs section
-  const prGroups = Object.entries(groups.PR)
+  const prGroups = Object.entries(groups["Pull Requests"])
     .filter(([key]) => key !== 'other')
     .map(([key, group]) => {
       const activities = group.events.map(event => {
@@ -409,7 +442,7 @@ const generateReport = (events: GitHubEvent[]) => {
   }
 
   // Issues section
-  const issueGroups = Object.entries(groups.Issue)
+  const issueGroups = Object.entries(groups["Issues"])
     .filter(([key]) => key !== 'other')
     .map(([key, group]) => {
       const activities = group.events.map(event => {
@@ -465,10 +498,10 @@ const generateReport = (events: GitHubEvent[]) => {
   }
 
   // Other section
-  const otherEvents = groups.Other.other.events.map(event => {
+  const otherEvents = groups["Other"].other.events.map(event => {
     const eventInfo = getEventSummary(event)
     // Remove actor name if it's the same for all events
-    const allSameActor = groups.Other.other.events.every(e => e.actor.login === event.actor.login)
+    const allSameActor = groups["Other"].other.events.every(e => e.actor.login === event.actor.login)
     return allSameActor 
       ? eventInfo.summary.replace(`${event.actor.login} `, '')
       : eventInfo.summary
@@ -485,7 +518,8 @@ const generateReport = (events: GitHubEvent[]) => {
 export default function GitHubEventViewer() {
   // State
   const [events, setEvents] = useState<GitHubEvent[]>([])
-  const [username, setUsername] = useState("")
+  const [usernames, setUsernames] = useState<string[]>([])
+  const [usernameInput, setUsernameInput] = useState("")
   const [startDate, setStartDate] = useState<Date>(subDays(new Date(), 4))
   const [endDate, setEndDate] = useState<Date>(new Date())
   const [isSyncing, setIsSyncing] = useState(false)
@@ -496,6 +530,7 @@ export default function GitHubEventViewer() {
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
   const [showReport, setShowReport] = useState(false)
   const [showReportPreview, setShowReportPreview] = useState(false)
+  const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -506,11 +541,13 @@ export default function GitHubEventViewer() {
     if (savedPrefs) {
       try {
         const prefs: UserPreferences = JSON.parse(savedPrefs)
-        setUsername(prefs.username || "")
+        setUsernames(prefs.usernames || [])
+        setUsernameInput(prefs.usernames?.join(", ") || "")
         setStartDate(prefs.startDate ? new Date(prefs.startDate) : subDays(new Date(), 4))
         setEndDate(prefs.endDate ? new Date(prefs.endDate) : new Date())
         setViewMode(prefs.viewMode || "grouped")
         setSelectedRepos(new Set(prefs.selectedRepos || []))
+        setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
 
         // Restore selected and expanded events
         if (prefs.selectedEvents) {
@@ -544,7 +581,7 @@ export default function GitHubEventViewer() {
   // Save preferences to localStorage when they change
   useEffect(() => {
     const prefs: UserPreferences = {
-      username,
+      usernames,
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       selectedEvents: Array.from(selectedEvents),
@@ -552,26 +589,38 @@ export default function GitHubEventViewer() {
       lastTheme: theme || "system",
       viewMode,
       selectedRepos: Array.from(selectedRepos),
+      selectedEventTypes: Array.from(selectedEventTypes),
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
-  }, [username, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos])
+  }, [usernames, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes])
 
   // Fetch events from GitHub API
   const fetchEvents = async () => {
-    if (!username) return
+    if (usernames.length === 0) return
 
     setIsSyncing(true)
     try {
-      const response = await fetch(`https://api.github.com/users/${username}/events?per_page=100`)
+      const allEvents: GitHubEvent[] = []
+      const errors: string[] = []
 
-      if (!response.ok) {
-        throw new Error(`GitHub API error: ${response.status}`)
+      // Fetch events for each username
+      for (const username of usernames) {
+        try {
+          const response = await fetch(`https://api.github.com/users/${username}/events?per_page=100`)
+
+          if (!response.ok) {
+            throw new Error(`GitHub API error: ${response.status}`)
+          }
+
+          const data: GitHubEvent[] = await response.json()
+          allEvents.push(...data)
+        } catch (error) {
+          errors.push(`${username}: ${error instanceof Error ? error.message : "Failed to fetch events"}`)
+        }
       }
 
-      const data: GitHubEvent[] = await response.json()
-
       // Filter events by date range
-      const filteredEvents = data.filter((event) => {
+      const filteredEvents = allEvents.filter((event) => {
         const eventDate = new Date(event.created_at)
         return eventDate >= startDate && eventDate <= endDate
       })
@@ -588,10 +637,19 @@ export default function GitHubEventViewer() {
       setLastSynced(now)
       localStorage.setItem("github-event-last-synced", now)
 
-      toast({
-        title: "Events synced",
-        description: `Fetched ${filteredEvents.length} events for ${username}`,
-      })
+      // Show success/error messages
+      if (errors.length > 0) {
+        toast({
+          title: "Partial sync completed",
+          description: `Fetched ${filteredEvents.length} events, but failed for: ${errors.join(", ")}`,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Events synced",
+          description: `Fetched ${filteredEvents.length} events for ${usernames.join(", ")}`,
+        })
+      }
     } catch (error) {
       console.error("Error fetching GitHub events:", error)
       toast({
@@ -607,11 +665,17 @@ export default function GitHubEventViewer() {
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    // Parse usernames from input
+    const newUsernames = usernameInput
+      .split(",")
+      .map(name => name.trim())
+      .filter(name => name.length > 0)
+    setUsernames(newUsernames)
     fetchEvents()
   }
 
   // Set date range presets
-  const setDateRange = (preset: "today" | "week" | "month") => {
+  const setDateRange = (preset: "today" | "week" | "month" | "threeDays") => {
     const end = new Date()
     let start: Date
 
@@ -626,12 +690,19 @@ export default function GitHubEventViewer() {
       case "month":
         start = subDays(new Date(), 30)
         break
+      case "threeDays":
+        start = subDays(new Date(), 3)
+        break
       default:
         start = subDays(new Date(), 4)
     }
 
     setStartDate(start)
     setEndDate(end)
+    // Automatically submit the form after setting the date range
+    if (usernames.length > 0) {
+      fetchEvents()
+    }
   }
 
   // Toggle raw JSON view for an event
@@ -759,7 +830,7 @@ export default function GitHubEventViewer() {
 
   // Background sync every 5 minutes
   useEffect(() => {
-    if (!username) return
+    if (usernames.length === 0) return
 
     const syncInterval = setInterval(
       () => {
@@ -769,13 +840,32 @@ export default function GitHubEventViewer() {
     )
 
     return () => clearInterval(syncInterval)
-  }, [username, startDate, endDate])
+  }, [usernames, startDate, endDate])
 
   // Get unique repositories from events
   const getUniqueRepos = (events: GitHubEvent[]): string[] => {
     const repos = new Set(events.map(event => event.repo.name))
     return Array.from(repos).sort()
   }
+
+  // Clean up repository selections when events change
+  useEffect(() => {
+    if (events.length > 0) {
+      const availableRepos = new Set(getUniqueRepos(events))
+      const newSelectedRepos = new Set(selectedRepos)
+      
+      // Remove selections for repositories that are no longer available
+      for (const repo of selectedRepos) {
+        if (!availableRepos.has(repo)) {
+          newSelectedRepos.delete(repo)
+        }
+      }
+      
+      if (newSelectedRepos.size !== selectedRepos.size) {
+        setSelectedRepos(newSelectedRepos)
+      }
+    }
+  }, [events])
 
   // Toggle repository selection
   const toggleRepoSelection = (repo: string) => {
@@ -788,10 +878,36 @@ export default function GitHubEventViewer() {
     setSelectedRepos(newSelected)
   }
 
-  // Filter events by selected repositories
+  // Toggle event type selection
+  const toggleEventTypeSelection = (category: EventCategory) => {
+    const newSelected = new Set(selectedEventTypes)
+    if (newSelected.has(category)) {
+      newSelected.delete(category)
+    } else {
+      newSelected.add(category)
+    }
+    setSelectedEventTypes(newSelected)
+  }
+
+  // Filter events by selected repositories and event types
   const getFilteredEvents = (events: GitHubEvent[]): GitHubEvent[] => {
-    if (selectedRepos.size === 0) return events
-    return events.filter(event => selectedRepos.has(event.repo.name))
+    let filtered = events
+
+    // Filter by repository - show all repositories if none selected
+    if (selectedRepos.size > 0) {
+      filtered = filtered.filter(event => selectedRepos.has(event.repo.name))
+    }
+
+    // Filter by event type - show all event types if none selected
+    if (selectedEventTypes.size > 0) {
+      filtered = filtered.filter(event => {
+        return Array.from(selectedEventTypes).some(category => 
+          EVENT_TYPES[category as EventCategory].includes(event.type)
+        )
+      })
+    }
+
+    return filtered
   }
 
   // Update the theme toggle button to use the saved theme
@@ -825,83 +941,111 @@ export default function GitHubEventViewer() {
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex-1">
                 <label htmlFor="username" className="block text-sm font-medium mb-1">
-                  GitHub Username
+                  GitHub Usernames
                 </label>
                 <Input
                   id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter GitHub username"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  placeholder="Enter GitHub usernames (comma-separated)"
                   className="w-full"
                 />
               </div>
 
               <div className="flex-1">
                 <label className="block text-sm font-medium mb-1">Date Range</label>
-                <div className="flex gap-2">
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="justify-start text-left font-normal flex-1">
-                        {format(startDate, "MMM d, yyyy")}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={startDate}
-                        onSelect={(date) => date && setStartDate(date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <span className="flex items-center">to</span>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="justify-start text-left font-normal flex-1">
-                        {format(endDate, "MMM d, yyyy")}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={endDate}
-                        onSelect={(date) => date && setEndDate(date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="justify-start text-left font-normal flex-1">
+                          {format(startDate, "MMM d, yyyy")}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={startDate}
+                          onSelect={(date) => date && setStartDate(date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <span className="flex items-center">to</span>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="justify-start text-left font-normal flex-1">
+                          {format(endDate, "MMM d, yyyy")}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={endDate}
+                          onSelect={(date) => date && setEndDate(date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("today")}>
+                      Today
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("threeDays")}>
+                      3 Days
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("week")}>
+                      This Week
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("month")}>
+                      This Month
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
 
             {events.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {getUniqueRepos(events).map(repo => (
-                  <Button
-                    key={repo}
-                    type="button"
-                    variant={selectedRepos.has(repo) ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => toggleRepoSelection(repo)}
-                  >
-                    {repo}
-                  </Button>
-                ))}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Repositories</label>
+                  <div className="flex flex-wrap gap-2">
+                    {getUniqueRepos(events).map(repo => (
+                      <Button
+                        key={repo}
+                        type="button"
+                        variant={selectedRepos.has(repo) ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => toggleRepoSelection(repo)}
+                      >
+                        {repo}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Event Types</label>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(EVENT_TYPES).map(([category, types]) => (
+                      <Button
+                        key={category}
+                        type="button"
+                        variant={selectedEventTypes.has(category) ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => toggleEventTypeSelection(category as EventCategory)}
+                      >
+                        {category} ({events.filter(e => types.includes(e.type)).length})
+                      </Button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => setDateRange("today")}>
-                Today
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setDateRange("week")}>
-                This Week
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setDateRange("month")}>
-                This Month
-              </Button>
-              <div className="flex-1"></div>
-              <Button type="submit" className="ml-auto" disabled={!username || isSyncing}>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={!usernameInput || isSyncing}>
                 {isSyncing ? (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -947,8 +1091,8 @@ export default function GitHubEventViewer() {
               Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events))).map(([category, numberGroups]) => (
                 <div key={category} className="space-y-3">
                   <h2 className="text-sm font-semibold text-muted-foreground">
-                    {category === "PR" ? "Pull Request Activity" : 
-                     category === "Issue" ? "Issue Activity" : 
+                    {category === "Pull Requests" ? "Pull Request Activity" : 
+                     category === "Issues" ? "Issue Activity" : 
                      "Other Activity"} ({Object.values(numberGroups).reduce((sum, group) => sum + group.events.length, 0)})
                   </h2>
                   {Object.entries(numberGroups).map(([number, group]) => (
@@ -1132,15 +1276,15 @@ export default function GitHubEventViewer() {
         </>
       )}
 
-      {events.length === 0 && username && !isSyncing && (
+      {events.length === 0 && usernames.length > 0 && !isSyncing && (
         <div className="text-center py-12">
-          <p className="text-muted-foreground">No events found for this user and date range.</p>
+          <p className="text-muted-foreground">No events found for these usernames and date range.</p>
         </div>
       )}
 
-      {!username && (
+      {!usernames.length && (
         <div className="text-center py-12">
-          <p className="text-muted-foreground">Enter a GitHub username to view events.</p>
+          <p className="text-muted-foreground">Enter GitHub usernames to view events.</p>
         </div>
       )}
 
