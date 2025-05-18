@@ -80,6 +80,7 @@ interface UserPreferences {
   selectedRepos: string[]
   selectedEventTypes: string[]
   showFilters: boolean
+  selectedLabels: string[]
 }
 
 // Add interface for related events
@@ -534,6 +535,7 @@ export default function GitHubEventViewer() {
   const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
   const [showFilters, setShowFilters] = useState(true)
   const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
+  const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set())
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -551,6 +553,7 @@ export default function GitHubEventViewer() {
         setViewMode(prefs.viewMode || "grouped")
         setSelectedRepos(new Set(prefs.selectedRepos || []))
         setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
+        setSelectedLabels(new Set(prefs.selectedLabels || []))
         setShowFilters(prefs.showFilters !== undefined ? prefs.showFilters : true)
 
         // Restore selected and expanded events
@@ -594,10 +597,11 @@ export default function GitHubEventViewer() {
       viewMode,
       selectedRepos: Array.from(selectedRepos),
       selectedEventTypes: Array.from(selectedEventTypes),
+      selectedLabels: Array.from(selectedLabels),
       showFilters,
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
-  }, [usernames, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes, showFilters])
+  }, [usernames, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes, selectedLabels, showFilters])
 
   // Fetch events from GitHub API
   const fetchEvents = async () => {
@@ -894,7 +898,57 @@ export default function GitHubEventViewer() {
     setSelectedEventTypes(newSelected)
   }
 
-  // Filter events by selected repositories and event types
+  // Get unique labels from events
+  const getUniqueLabels = (events: GitHubEvent[]): string[] => {
+    const labels = new Set<string>()
+    events.forEach(event => {
+      if (event.type === "PullRequestEvent" && event.payload.pull_request?.labels) {
+        event.payload.pull_request.labels.forEach((label: { name: string }) => {
+          labels.add(label.name)
+        })
+      } else if (event.type === "IssuesEvent" && event.payload.issue?.labels) {
+        event.payload.issue.labels.forEach((label: { name: string }) => {
+          labels.add(label.name)
+        })
+      }
+    })
+    return Array.from(labels).sort()
+  }
+
+  // Toggle label selection
+  const toggleLabelSelection = (label: string) => {
+    const newSelected = new Set(selectedLabels)
+    if (newSelected.has(label)) {
+      newSelected.delete(label)
+    } else {
+      newSelected.add(label)
+    }
+    setSelectedLabels(newSelected)
+  }
+
+  // Get count of active filters
+  const getActiveFilterCount = () => {
+    return selectedRepos.size + selectedEventTypes.size + selectedLabels.size
+  }
+
+  // Get filter description
+  const getFilterDescription = () => {
+    if (getActiveFilterCount() === 0) return "No filters"
+    
+    const parts = []
+    if (selectedRepos.size > 0) {
+      parts.push(`${selectedRepos.size} repository${selectedRepos.size > 1 ? 'ies' : ''}`)
+    }
+    if (selectedEventTypes.size > 0) {
+      parts.push(`${selectedEventTypes.size} event type${selectedEventTypes.size > 1 ? 's' : ''}`)
+    }
+    if (selectedLabels.size > 0) {
+      parts.push(`${selectedLabels.size} label${selectedLabels.size > 1 ? 's' : ''}`)
+    }
+    return parts.join(', ')
+  }
+
+  // Filter events by selected repositories, event types, and labels
   const getFilteredEvents = (events: GitHubEvent[]): GitHubEvent[] => {
     let filtered = events
 
@@ -912,26 +966,24 @@ export default function GitHubEventViewer() {
       })
     }
 
+    // Filter by labels - show all events if no labels selected
+    if (selectedLabels.size > 0) {
+      filtered = filtered.filter(event => {
+        if (event.type === "PullRequestEvent" && event.payload.pull_request?.labels) {
+          return event.payload.pull_request.labels.some((label: { name: string }) => 
+            selectedLabels.has(label.name)
+          )
+        }
+        if (event.type === "IssuesEvent" && event.payload.issue?.labels) {
+          return event.payload.issue.labels.some((label: { name: string }) => 
+            selectedLabels.has(label.name)
+          )
+        }
+        return false
+      })
+    }
+
     return filtered
-  }
-
-  // Get count of active filters
-  const getActiveFilterCount = () => {
-    return selectedRepos.size + selectedEventTypes.size
-  }
-
-  // Get filter description
-  const getFilterDescription = () => {
-    if (getActiveFilterCount() === 0) return "No filters"
-    
-    const parts = []
-    if (selectedRepos.size > 0) {
-      parts.push(`${selectedRepos.size} repository${selectedRepos.size > 1 ? 'ies' : ''}`)
-    }
-    if (selectedEventTypes.size > 0) {
-      parts.push(`${selectedEventTypes.size} event type${selectedEventTypes.size > 1 ? 's' : ''}`)
-    }
-    return parts.join(', ')
   }
 
   // Update the theme toggle button to use the saved theme
@@ -1087,6 +1139,23 @@ export default function GitHubEventViewer() {
                               onClick={() => toggleEventTypeSelection(category as EventCategory)}
                             >
                               {category} ({events.filter(e => types.includes(e.type)).length})
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Labels</label>
+                        <div className="flex flex-wrap gap-2">
+                          {getUniqueLabels(events).map(label => (
+                            <Button
+                              key={label}
+                              type="button"
+                              variant={selectedLabels.has(label) ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => toggleLabelSelection(label)}
+                            >
+                              {label}
                             </Button>
                           ))}
                         </div>
