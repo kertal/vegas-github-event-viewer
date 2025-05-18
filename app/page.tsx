@@ -531,6 +531,7 @@ export default function GitHubEventViewer() {
   const [showReport, setShowReport] = useState(false)
   const [showReportPreview, setShowReportPreview] = useState(false)
   const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
+  const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -987,21 +988,32 @@ export default function GitHubEventViewer() {
                         />
                       </PopoverContent>
                     </Popover>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("today")}>
-                      Today
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("threeDays")}>
-                      3 Days
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("week")}>
-                      This Week
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("month")}>
-                      This Month
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowQuickDateOptions(!showQuickDateOptions)}
+                      className="px-2"
+                    >
+                      {showQuickDateOptions ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </Button>
                   </div>
+                  {showQuickDateOptions && (
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("today")}>
+                        Today
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("threeDays")}>
+                        3 Days
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("week")}>
+                        This Week
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("month")}>
+                        This Month
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
