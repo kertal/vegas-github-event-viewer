@@ -1205,28 +1205,41 @@ export default function GitHubEventViewer() {
       {events.length > 0 && (
         <>
           <div className="flex justify-between items-center mb-2">
+            <div className="flex items-center">
+              <div className="inline-flex rounded-md border border-input bg-background">
+                <Button
+                  variant={viewMode === "grouped" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setViewMode("grouped")}
+                  className="rounded-r-none border-r"
+                >
+                  Grouped
+                </Button>
+                <Button
+                  variant={viewMode === "timeline" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setViewMode("timeline")}
+                  className="rounded-l-none"
+                >
+                  Timeline
+                </Button>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               {selectedEvents.size > 0 && (
                 <Button variant="outline" size="sm" onClick={() => setSelectedEvents(new Set())}>
                   Deselect All
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setViewMode(viewMode === "grouped" ? "timeline" : "grouped")}
+              <Button 
+                onClick={() => setShowReportPreview(true)} 
+                size="sm" 
+                className="flex items-center gap-2"
               >
-                {viewMode === "grouped" ? "Show Timeline" : "Show Grouped"}
+                <ClipboardCopy className="h-4 w-4" />
+                Generate Report {selectedEvents.size > 0 ? `(${selectedEvents.size})` : `(${getFilteredEvents(events).length})`}
               </Button>
             </div>
-            <Button 
-              onClick={() => setShowReportPreview(true)} 
-              size="sm" 
-              className="flex items-center gap-2"
-            >
-              <ClipboardCopy className="h-4 w-4" />
-              Generate Report {selectedEvents.size > 0 ? `(${selectedEvents.size})` : `(${getFilteredEvents(events).length})`}
-            </Button>
           </div>
 
           <div className="space-y-3">
