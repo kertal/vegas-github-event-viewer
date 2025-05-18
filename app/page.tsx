@@ -1098,6 +1098,19 @@ export default function GitHubEventViewer() {
                   )}
                 </div>
               </div>
+
+              <div className="flex items-end">
+                <Button type="submit" disabled={!usernameInput || isSyncing} className="h-10">
+                  {isSyncing ? (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                      Syncing...
+                    </>
+                  ) : (
+                    "Fetch Events"
+                  )}
+                </Button>
+              </div>
             </div>
 
             {events.length > 0 && (
@@ -1185,19 +1198,6 @@ export default function GitHubEventViewer() {
                 </div>
               </div>
             )}
-
-            <div className="flex justify-end">
-              <Button type="submit" disabled={!usernameInput || isSyncing}>
-                {isSyncing ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Syncing...
-                  </>
-                ) : (
-                  "Fetch Events"
-                )}
-              </Button>
-            </div>
           </form>
         </CardContent>
       </Card>
