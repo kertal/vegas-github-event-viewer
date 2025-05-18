@@ -1047,98 +1047,99 @@ export default function GitHubEventViewer() {
                 </Button>
               </div>
             </div>
-
-            {events.length > 0 && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Filters</label>
-                  <div className="flex items-center justify-between mb-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowFilters(!showFilters)}
-                      className="flex items-center gap-2 w-full justify-between text-muted-foreground"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span>{getFilterDescription()}</span>
-                        {getActiveFilterCount() > 0 && !showFilters && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              clearAllFilters()
-                            }}
-                            className="text-xs text-blue-500 hover:text-blue-600 hover:underline"
-                          >
-                            Clear all
-                          </button>
-                        )}
-                      </div>
-                      {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  {showFilters && (
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Repositories</label>
-                        <div className="flex flex-wrap gap-2">
-                          {getUniqueRepos(events).map(repo => (
-                            <Button
-                              key={repo}
-                              type="button"
-                              variant={selectedRepos.has(repo) ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => toggleRepoSelection(repo)}
-                            >
-                              {repo}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Event Types</label>
-                        <div className="flex flex-wrap gap-2">
-                          {Object.entries(EVENT_TYPES).map(([category, types]) => (
-                            <Button
-                              key={category}
-                              type="button"
-                              variant={selectedEventTypes.has(category) ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => toggleEventTypeSelection(category as EventCategory)}
-                            >
-                              {category} ({events.filter(e => types.includes(e.type)).length})
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Labels</label>
-                        <div className="flex flex-wrap gap-2">
-                          {getUniqueLabels(events).map(label => (
-                            <Button
-                              key={label}
-                              type="button"
-                              variant={selectedLabels.has(label) ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => toggleLabelSelection(label)}
-                            >
-                              {label}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </form>
         </CardContent>
       </Card>
 
       {events.length > 0 && (
         <>
+          <Card className="mb-6">
+            <CardContent className="pt-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Filters</label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowFilters(!showFilters)}
+                    className="flex items-center gap-2 text-muted-foreground"
+                  >
+                    <span className="text-xs">{getFilterDescription()}</span>
+                    {getActiveFilterCount() > 0 && !showFilters && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          clearAllFilters()
+                        }}
+                        className="text-xs text-blue-500 hover:text-blue-600 hover:underline ml-2"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                    {showFilters ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </Button>
+                </div>
+                {showFilters && (
+                  <div className="space-y-2 pt-1">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Repositories</label>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {getUniqueRepos(events).map(repo => (
+                          <Button
+                            key={repo}
+                            type="button"
+                            variant={selectedRepos.has(repo) ? "default" : "outline"}
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => toggleRepoSelection(repo)}
+                          >
+                            {repo}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Event Types</label>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Object.entries(EVENT_TYPES).map(([category, types]) => (
+                          <Button
+                            key={category}
+                            type="button"
+                            variant={selectedEventTypes.has(category) ? "default" : "outline"}
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => toggleEventTypeSelection(category as EventCategory)}
+                          >
+                            {category} ({events.filter(e => types.includes(e.type)).length})
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Labels</label>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {getUniqueLabels(events).map(label => (
+                          <Button
+                            key={label}
+                            type="button"
+                            variant={selectedLabels.has(label) ? "default" : "outline"}
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => toggleLabelSelection(label)}
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center">
               <div className="inline-flex rounded-md border border-input bg-background">
