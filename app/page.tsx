@@ -13,7 +13,6 @@ import { Calendar } from "@/components/ui/calendar"
 import { useToast } from "@/hooks/use-toast"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
-import ReactMarkdown from "react-markdown"
 
 // Types
 interface GitHubEvent {
@@ -391,6 +390,7 @@ const generateReport = (events: GitHubEvent[]) => {
     .map(([key, group]) => {
       const activities = group.events.map(event => {
         const eventInfo = getEventSummary(event)
+        // For single person, remove the actor name from the summary
         const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
         return allSameActor 
           ? eventInfo.summary.replace(`${event.actor.login} `, '')
@@ -400,7 +400,7 @@ const generateReport = (events: GitHubEvent[]) => {
     })
 
   if (prGroups.length > 0) {
-    report.push('* Pull Requests')
+    report.push('Pull Requests')
 
     // Opened PRs
     const openedPRs = prGroups.filter(({ activities }) => 
@@ -408,9 +408,9 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('created pull request')
     )
     if (openedPRs.length > 0) {
-      report.push('  * Opened')
+      report.push('  Opened')
       report.push(...openedPRs.map(({ key, group }) => 
-        `    * [${group.title}](${group.url}) (${key})`
+        `    [${group.title}](${group.url}) (${key})`
       ))
     }
 
@@ -420,9 +420,9 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('commented on pull request')
     )
     if (reviewedPRs.length > 0) {
-      report.push('  * Reviewed')
+      report.push('  Reviewed')
       report.push(...reviewedPRs.map(({ key, group }) => 
-        `    * [${group.title}](${group.url}) (${key})`
+        `    [${group.title}](${group.url}) (${key})`
       ))
     }
 
@@ -432,9 +432,9 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('merged pull request')
     )
     if (closedPRs.length > 0) {
-      report.push('  * Closed')
+      report.push('  Closed')
       report.push(...closedPRs.map(({ key, group }) => 
-        `    * [${group.title}](${group.url}) (${key})`
+        `    [${group.title}](${group.url}) (${key})`
       ))
     }
   }
@@ -445,6 +445,7 @@ const generateReport = (events: GitHubEvent[]) => {
     .map(([key, group]) => {
       const activities = group.events.map(event => {
         const eventInfo = getEventSummary(event)
+        // For single person, remove the actor name from the summary
         const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
         return allSameActor 
           ? eventInfo.summary.replace(`${event.actor.login} `, '')
@@ -454,7 +455,7 @@ const generateReport = (events: GitHubEvent[]) => {
     })
 
   if (issueGroups.length > 0) {
-    report.push('* Issues')
+    report.push('Issues')
 
     // Opened Issues
     const openedIssues = issueGroups.filter(({ activities }) => 
@@ -462,9 +463,9 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('created issue')
     )
     if (openedIssues.length > 0) {
-      report.push('  * Opened')
+      report.push('  Opened')
       report.push(...openedIssues.map(({ key, group }) => 
-        `    * [${group.title}](${group.url}) (${key})`
+        `    [${group.title}](${group.url}) (${key})`
       ))
     }
 
@@ -473,9 +474,9 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('commented on issue')
     )
     if (commentedIssues.length > 0) {
-      report.push('  * Commented')
+      report.push('  Commented')
       report.push(...commentedIssues.map(({ key, group }) => 
-        `    * [${group.title}](${group.url}) (${key})`
+        `    [${group.title}](${group.url}) (${key})`
       ))
     }
 
@@ -484,9 +485,9 @@ const generateReport = (events: GitHubEvent[]) => {
       activities.includes('closed issue')
     )
     if (closedIssues.length > 0) {
-      report.push('  * Closed')
+      report.push('  Closed')
       report.push(...closedIssues.map(({ key, group }) => 
-        `    * [${group.title}](${group.url}) (${key})`
+        `    [${group.title}](${group.url}) (${key})`
       ))
     }
   }
@@ -494,6 +495,7 @@ const generateReport = (events: GitHubEvent[]) => {
   // Other section
   const otherEvents = groups["Other"].other.events.map(event => {
     const eventInfo = getEventSummary(event)
+    // For single person, remove the actor name from the summary
     const allSameActor = groups["Other"].other.events.every(e => e.actor.login === event.actor.login)
     return allSameActor 
       ? eventInfo.summary.replace(`${event.actor.login} `, '')
@@ -501,8 +503,8 @@ const generateReport = (events: GitHubEvent[]) => {
   })
 
   if (otherEvents.length > 0) {
-    report.push('* Other Activity')
-    report.push(...otherEvents.map(event => `  * ${event}`))
+    report.push('Other Activity')
+    report.push(...otherEvents.map(event => `  ${event}`))
   }
 
   return report.join('\n')
@@ -527,6 +529,7 @@ export default function GitHubEventViewer() {
   const [showFilters, setShowFilters] = useState(true)
   const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set())
+  const [lastRequestKey, setLastRequestKey] = useState<string>("")
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -598,7 +601,17 @@ export default function GitHubEventViewer() {
   const fetchEvents = async () => {
     if (usernames.length === 0) return
 
+    // Create a unique key for this request
+    const requestKey = `${usernames.join(',')}-${startDate.toISOString()}-${endDate.toISOString()}`
+    
+    // Skip if this is a duplicate request
+    if (requestKey === lastRequestKey && isSyncing) {
+      return
+    }
+
     setIsSyncing(true)
+    setLastRequestKey(requestKey)
+
     try {
       const allEvents: GitHubEvent[] = []
       const errors: string[] = []
@@ -609,14 +622,28 @@ export default function GitHubEventViewer() {
           const response = await fetch(`https://api.github.com/users/${username}/events?per_page=100`)
 
           if (!response.ok) {
-            throw new Error(`GitHub API error: ${response.status}`)
+            const errorData = await response.json().catch(() => null)
+            const errorMessage = errorData?.message || `HTTP error ${response.status}`
+            throw new Error(errorMessage)
           }
 
           const data: GitHubEvent[] = await response.json()
           allEvents.push(...data)
         } catch (error) {
-          errors.push(`${username}: ${error instanceof Error ? error.message : "Failed to fetch events"}`)
+          const errorMessage = error instanceof Error ? error.message : "Failed to fetch events"
+          errors.push(`${username}: ${errorMessage}`)
+          console.error(`Error fetching events for ${username}:`, error)
         }
+      }
+
+      // If all fetches failed, keep existing data
+      if (allEvents.length === 0) {
+        toast({
+          title: "Fetch failed",
+          description: errors.join("\n"),
+          variant: "destructive",
+        })
+        return
       }
 
       // Filter events by date range
@@ -628,20 +655,31 @@ export default function GitHubEventViewer() {
       // Sort events newest to oldest
       filteredEvents.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
-      setEvents(filteredEvents)
-
-      // Cache events in localStorage
-      localStorage.setItem("github-event-cache", JSON.stringify(filteredEvents))
-
-      const now = new Date().toISOString()
-      setLastSynced(now)
-      localStorage.setItem("github-event-last-synced", now)
+      // Only update state and storage if we have events
+      if (filteredEvents.length > 0) {
+        setEvents(filteredEvents)
+        // Cache events in localStorage
+        localStorage.setItem("github-event-cache", JSON.stringify(filteredEvents))
+        const now = new Date().toISOString()
+        setLastSynced(now)
+        localStorage.setItem("github-event-last-synced", now)
+      }
 
       // Show success/error messages
       if (errors.length > 0) {
         toast({
           title: "Partial sync completed",
-          description: `Fetched ${filteredEvents.length} events, but failed for: ${errors.join(", ")}`,
+          description: (
+            <div className="space-y-2">
+              <p>Fetched {filteredEvents.length} events</p>
+              <p className="font-medium">Errors:</p>
+              <ul className="list-disc pl-4">
+                {errors.map((error, index) => (
+                  <li key={index}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          ),
           variant: "destructive",
         })
       } else {
@@ -828,18 +866,11 @@ export default function GitHubEventViewer() {
     }
   }
 
-  // Background sync every 5 minutes
+  // Add effect to fetch events when username or date range changes
   useEffect(() => {
-    if (usernames.length === 0) return
-
-    const syncInterval = setInterval(
-      () => {
-        fetchEvents()
-      },
-      5 * 60 * 1000,
-    )
-
-    return () => clearInterval(syncInterval)
+    if (usernames.length > 0) {
+      fetchEvents()
+    }
   }, [usernames, startDate, endDate])
 
   // Get unique repositories from events
@@ -1223,26 +1254,6 @@ export default function GitHubEventViewer() {
                   Report
                 </Button>
               </div>
-              {viewMode === "report" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="ml-2"
-                  onClick={() => {
-                    const eventsToExport = getFilteredEvents(events).filter((event) => 
-                      selectedEvents.size === 0 || selectedEvents.has(event.id)
-                    )
-                    const report = generateReport(eventsToExport)
-                    navigator.clipboard.writeText(report)
-                    toast({
-                      title: "Report copied",
-                      description: "The report has been copied to your clipboard",
-                    })
-                  }}
-                >
-                  Copy
-                </Button>
-              )}
             </div>
             <div className="flex items-center gap-2">
               {selectedEvents.size > 0 && (
@@ -1476,51 +1487,11 @@ export default function GitHubEventViewer() {
                                 className="w-6 h-6 rounded-full"
                                 title={login}
                                 onClick={() => window.open(`https://github.com/${login}`, '_blank')}
-                                style={{ cursor: 'pointer' }}
                               />
                             ))}
                           </div>
                         </>
                       )}
-                      <ReactMarkdown
-                        components={{
-                          ul: ({ children }) => (
-                            <ul className="list-disc pl-4 text-sm">
-                              {children}
-                            </ul>
-                          ),
-                          li: ({ children }) => (
-                            <li className="my-1">
-                              {children}
-                            </li>
-                          ),
-                          h2: ({ children }) => (
-                            <h2 className="text-sm font-semibold text-muted-foreground mt-6 mb-2">
-                              {children}
-                            </h2>
-                          ),
-                          h3: ({ children }) => (
-                            <h3 className="text-sm font-semibold text-muted-foreground mt-4 mb-2">
-                              {children}
-                            </h3>
-                          ),
-                          a: ({ href, children }) => (
-                            <a 
-                              href={href} 
-                              className="text-sm font-medium hover:underline" 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                            >
-                              {children}
-                            </a>
-                          ),
-                          p: ({ children }) => (
-                            <p className="text-sm">{children}</p>
-                          ),
-                        }}
-                      >
-                        {generateReport(eventsToExport)}
-                      </ReactMarkdown>
                     </>
                   )
                 })()}
@@ -1528,18 +1499,6 @@ export default function GitHubEventViewer() {
             )}
           </div>
         </>
-      )}
-
-      {events.length === 0 && usernames.length > 0 && !isSyncing && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">No events found for these usernames and date range.</p>
-        </div>
-      )}
-
-      {!usernames.length && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">Enter GitHub usernames to view events.</p>
-        </div>
       )}
     </div>
   )
