@@ -986,6 +986,13 @@ export default function GitHubEventViewer() {
     return filtered
   }
 
+  // Clear all filters
+  const clearAllFilters = () => {
+    setSelectedRepos(new Set())
+    setSelectedEventTypes(new Set())
+    setSelectedLabels(new Set())
+  }
+
   // Update the theme toggle button to use the saved theme
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -1035,7 +1042,7 @@ export default function GitHubEventViewer() {
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button variant="outline" className="justify-start text-left font-normal flex-1">
-                          {format(startDate, "MMM d, yyyy")}
+                          {format(startDate, "EEE, MMM d, yyyy")}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
@@ -1051,7 +1058,7 @@ export default function GitHubEventViewer() {
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button variant="outline" className="justify-start text-left font-normal flex-1">
-                          {format(endDate, "MMM d, yyyy")}
+                          {format(endDate, "EEE, MMM d, yyyy")}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
@@ -1104,7 +1111,20 @@ export default function GitHubEventViewer() {
                       onClick={() => setShowFilters(!showFilters)}
                       className="flex items-center gap-2 w-full justify-between text-muted-foreground"
                     >
-                      <span>{getFilterDescription()}</span>
+                      <div className="flex items-center gap-2">
+                        <span>{getFilterDescription()}</span>
+                        {getActiveFilterCount() > 0 && !showFilters && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              clearAllFilters()
+                            }}
+                            className="text-xs text-blue-500 hover:text-blue-600 hover:underline"
+                          >
+                            Clear all
+                          </button>
+                        )}
+                      </div>
                       {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </Button>
                   </div>
@@ -1258,7 +1278,7 @@ export default function GitHubEventViewer() {
                                       {getEventEmoji(event.type)}
                                     </div>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
-                                      {format(new Date(event.created_at), "MMM d, HH:mm")}
+                                      {format(new Date(event.created_at), "EEE, MMM d, HH:mm")}
                                     </span>
                                     <img
                                       src={event.actor.avatar_url}
@@ -1342,7 +1362,7 @@ export default function GitHubEventViewer() {
                           {getEventEmoji(event.type)}
                         </div>
                         <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
-                          {format(new Date(event.created_at), "MMM d, HH:mm")}
+                          {format(new Date(event.created_at), "EEE, MMM d, HH:mm")}
                         </span>
                         <img
                           src={event.actor.avatar_url}
