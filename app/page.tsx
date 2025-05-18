@@ -72,14 +72,13 @@ interface UserPreferences {
   usernames: string[]
   startDate: string
   endDate: string
-  selectedEvents: string[]
   expandedEvents: string[]
   lastTheme: string
   viewMode: ViewMode
   selectedRepos: string[]
   selectedEventTypes: string[]
-  showFilters: boolean
   selectedLabels: string[]
+  showFilters: boolean
 }
 
 // Add interface for related events
@@ -520,7 +519,6 @@ export default function GitHubEventViewer() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
-  const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<ViewMode>("grouped")
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
   const [showReport, setShowReport] = useState(false)
@@ -549,11 +547,6 @@ export default function GitHubEventViewer() {
         setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
         setSelectedLabels(new Set(prefs.selectedLabels || []))
         setShowFilters(prefs.showFilters !== undefined ? prefs.showFilters : true)
-
-        // Restore selected and expanded events
-        if (prefs.selectedEvents) {
-          setSelectedEvents(new Set(prefs.selectedEvents))
-        }
 
         if (prefs.expandedEvents) {
           setExpandedEvents(new Set(prefs.expandedEvents))
@@ -585,7 +578,6 @@ export default function GitHubEventViewer() {
       usernames,
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
-      selectedEvents: Array.from(selectedEvents),
       expandedEvents: Array.from(expandedEvents),
       lastTheme: theme || "system",
       viewMode,
@@ -595,7 +587,156 @@ export default function GitHubEventViewer() {
       showFilters,
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
-  }, [usernames, startDate, endDate, selectedEvents, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes, selectedLabels, showFilters])
+  }, [usernames, startDate, endDate, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes, selectedLabels, showFilters])
+
+  // Toggle raw JSON view for an event
+  const toggleEventExpansion = (eventId: string) => {
+    const newExpanded = new Set(expandedEvents)
+    if (newExpanded.has(eventId)) {
+      newExpanded.delete(eventId)
+    } else {
+      newExpanded.add(eventId)
+    }
+    setExpandedEvents(newExpanded)
+  }
+
+  // Get filtered events
+  const getFilteredEvents = (events: GitHubEvent[]): GitHubEvent[] => {
+    let filtered = events
+
+    // Filter by repository - show all repositories if none selected
+    if (selectedRepos.size > 0) {
+      filtered = filtered.filter(event => selectedRepos.has(event.repo.name))
+    }
+
+    // Filter by event type - show all event types if none selected
+    if (selectedEventTypes.size > 0) {
+      filtered = filtered.filter(event => {
+        return Array.from(selectedEventTypes).some(category => 
+          EVENT_TYPES[category as EventCategory].includes(event.type)
+        )
+      })
+    }
+
+    // Filter by labels - show all events if no labels selected
+    if (selectedLabels.size > 0) {
+      filtered = filtered.filter(event => {
+        if (event.type === "PullRequestEvent" && event.payload.pull_request?.labels) {
+          return event.payload.pull_request.labels.some((label: { name: string }) => 
+            selectedLabels.has(label.name)
+          )
+        }
+        if (event.type === "IssuesEvent" && event.payload.issue?.labels) {
+          return event.payload.issue.labels.some((label: { name: string }) => 
+            selectedLabels.has(label.name)
+          )
+        }
+        return false
+      })
+    }
+
+    return filtered
+  }
+
+  // Clear all filters
+  const clearAllFilters = () => {
+    setSelectedRepos(new Set())
+    setSelectedEventTypes(new Set())
+    setSelectedLabels(new Set())
+  }
+
+  // Get count of active filters
+  const getActiveFilterCount = () => {
+    return selectedRepos.size + selectedEventTypes.size + selectedLabels.size
+  }
+
+  // Get filter description
+  const getFilterDescription = () => {
+    if (getActiveFilterCount() === 0) return "No filters"
+    
+    const parts = []
+    if (selectedRepos.size > 0) {
+      parts.push(`${selectedRepos.size} repository${selectedRepos.size > 1 ? 'ies' : ''}`)
+    }
+    if (selectedEventTypes.size > 0) {
+      parts.push(`${selectedEventTypes.size} event type${selectedEventTypes.size > 1 ? 's' : ''}`)
+    }
+    if (selectedLabels.size > 0) {
+      parts.push(`${selectedLabels.size} label${selectedLabels.size > 1 ? 's' : ''}`)
+    }
+    return parts.join(', ')
+  }
+
+  // Handle form submission
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    // Parse usernames from input
+    const newUsernames = usernameInput
+      .split(",")
+      .map(name => name.trim())
+      .filter(name => name.length > 0)
+    setUsernames(newUsernames)
+    fetchEvents()
+  }
+
+  // Set date range presets
+  const setDateRange = (preset: "today" | "week" | "month" | "threeDays") => {
+    const end = new Date()
+    let start: Date
+
+    switch (preset) {
+      case "today":
+        start = new Date()
+        start.setHours(0, 0, 0, 0)
+        break
+      case "week":
+        start = subDays(new Date(), 7)
+        break
+      case "month":
+        start = subDays(new Date(), 30)
+        break
+      case "threeDays":
+        start = subDays(new Date(), 3)
+        break
+      default:
+        start = subDays(new Date(), 4)
+    }
+
+    setStartDate(start)
+    setEndDate(end)
+    // Automatically submit the form after setting the date range
+    if (usernames.length > 0) {
+      fetchEvents()
+    }
+  }
+
+  // Get unique repositories from events
+  const getUniqueRepos = (events: GitHubEvent[]): string[] => {
+    const repos = new Set(events.map(event => event.repo.name))
+    return Array.from(repos).sort()
+  }
+
+  // Toggle repository selection
+  const toggleRepoSelection = (repo: string) => {
+    const newSelected = new Set(selectedRepos)
+    if (newSelected.has(repo)) {
+      newSelected.delete(repo)
+    } else {
+      newSelected.add(repo)
+    }
+    setSelectedRepos(newSelected)
+  }
+
+  // Toggle event type selection
+  const toggleEventTypeSelection = (category: EventCategory) => {
+    const newSelected = new Set(selectedEventTypes)
+    if (newSelected.has(category)) {
+      newSelected.delete(category)
+    } else {
+      newSelected.add(category)
+    }
+    setSelectedEventTypes(newSelected)
+  }
 
   // Fetch events from GitHub API
   const fetchEvents = async () => {
@@ -700,110 +841,32 @@ export default function GitHubEventViewer() {
     }
   }
 
-  // Handle form submission
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    // Parse usernames from input
-    const newUsernames = usernameInput
-      .split(",")
-      .map(name => name.trim())
-      .filter(name => name.length > 0)
-    setUsernames(newUsernames)
-    fetchEvents()
-  }
-
-  // Set date range presets
-  const setDateRange = (preset: "today" | "week" | "month" | "threeDays") => {
-    const end = new Date()
-    let start: Date
-
-    switch (preset) {
-      case "today":
-        start = new Date()
-        start.setHours(0, 0, 0, 0)
-        break
-      case "week":
-        start = subDays(new Date(), 7)
-        break
-      case "month":
-        start = subDays(new Date(), 30)
-        break
-      case "threeDays":
-        start = subDays(new Date(), 3)
-        break
-      default:
-        start = subDays(new Date(), 4)
-    }
-
-    setStartDate(start)
-    setEndDate(end)
-    // Automatically submit the form after setting the date range
-    if (usernames.length > 0) {
-      fetchEvents()
-    }
-  }
-
-  // Toggle raw JSON view for an event
-  const toggleEventExpansion = (eventId: string) => {
-    const newExpanded = new Set(expandedEvents)
-    if (newExpanded.has(eventId)) {
-      newExpanded.delete(eventId)
-    } else {
-      newExpanded.add(eventId)
-    }
-    setExpandedEvents(newExpanded)
-  }
-
-  // Toggle event selection for export
-  const toggleEventSelection = (eventId: string) => {
-    const newSelected = new Set(selectedEvents)
-    if (newSelected.has(eventId)) {
-      newSelected.delete(eventId)
-    } else {
-      newSelected.add(eventId)
-    }
-    setSelectedEvents(newSelected)
-  }
-
-  // Select all events
-  const selectAllEvents = () => {
-    if (selectedEvents.size === events.length) {
-      setSelectedEvents(new Set())
-    } else {
-      setSelectedEvents(new Set(events.map((event) => event.id)))
-    }
-  }
-
-  // Export selected events
-  const exportEvents = () => {
-    const eventsToExport = events.filter((event) => selectedEvents.size === 0 || selectedEvents.has(event.id))
-
-    // Group events by type
-    const groupedEvents: Record<string, GitHubEvent[]> = {}
-    eventsToExport.forEach((event) => {
-      if (!groupedEvents[event.type]) {
-        groupedEvents[event.type] = []
+  // Get unique labels from events
+  const getUniqueLabels = (events: GitHubEvent[]): string[] => {
+    const labels = new Set<string>()
+    events.forEach(event => {
+      if (event.type === "PullRequestEvent" && event.payload.pull_request?.labels) {
+        event.payload.pull_request.labels.forEach((label: { name: string }) => {
+          labels.add(label.name)
+        })
+      } else if (event.type === "IssuesEvent" && event.payload.issue?.labels) {
+        event.payload.issue.labels.forEach((label: { name: string }) => {
+          labels.add(label.name)
+        })
       }
-      groupedEvents[event.type].push(event)
     })
+    return Array.from(labels).sort()
+  }
 
-    // Format for clipboard
-    const exportText = Object.entries(groupedEvents)
-      .map(([type, events]) => {
-        return `## ${type} (${events.length})\n\n${events
-          .map(
-            (e) =>
-              `- ${format(new Date(e.created_at), "yyyy-MM-dd HH:mm")} - ${e.repo.name}\n  ${JSON.stringify(e.payload, null, 2)}`,
-          )
-          .join("\n\n")}`
-      })
-      .join("\n\n")
-
-    navigator.clipboard.writeText(exportText)
-    toast({
-      title: "Events exported",
-      description: `${eventsToExport.length} events copied to clipboard`,
-    })
+  // Toggle label selection
+  const toggleLabelSelection = (label: string) => {
+    const newSelected = new Set(selectedLabels)
+    if (newSelected.has(label)) {
+      newSelected.delete(label)
+    } else {
+      newSelected.add(label)
+    }
+    setSelectedLabels(newSelected)
   }
 
   // Get emoji for event type
@@ -866,156 +929,6 @@ export default function GitHubEventViewer() {
     }
   }
 
-  // Add effect to fetch events when username or date range changes
-  useEffect(() => {
-    if (usernames.length > 0) {
-      fetchEvents()
-    }
-  }, [usernames, startDate, endDate])
-
-  // Get unique repositories from events
-  const getUniqueRepos = (events: GitHubEvent[]): string[] => {
-    const repos = new Set(events.map(event => event.repo.name))
-    return Array.from(repos).sort()
-  }
-
-  // Clean up repository selections when events change
-  useEffect(() => {
-    if (events.length > 0) {
-      const availableRepos = new Set(getUniqueRepos(events))
-      const newSelectedRepos = new Set(selectedRepos)
-      
-      // Remove selections for repositories that are no longer available
-      for (const repo of selectedRepos) {
-        if (!availableRepos.has(repo)) {
-          newSelectedRepos.delete(repo)
-        }
-      }
-      
-      if (newSelectedRepos.size !== selectedRepos.size) {
-        setSelectedRepos(newSelectedRepos)
-      }
-    }
-  }, [events])
-
-  // Toggle repository selection
-  const toggleRepoSelection = (repo: string) => {
-    const newSelected = new Set(selectedRepos)
-    if (newSelected.has(repo)) {
-      newSelected.delete(repo)
-    } else {
-      newSelected.add(repo)
-    }
-    setSelectedRepos(newSelected)
-  }
-
-  // Toggle event type selection
-  const toggleEventTypeSelection = (category: EventCategory) => {
-    const newSelected = new Set(selectedEventTypes)
-    if (newSelected.has(category)) {
-      newSelected.delete(category)
-    } else {
-      newSelected.add(category)
-    }
-    setSelectedEventTypes(newSelected)
-  }
-
-  // Get unique labels from events
-  const getUniqueLabels = (events: GitHubEvent[]): string[] => {
-    const labels = new Set<string>()
-    events.forEach(event => {
-      if (event.type === "PullRequestEvent" && event.payload.pull_request?.labels) {
-        event.payload.pull_request.labels.forEach((label: { name: string }) => {
-          labels.add(label.name)
-        })
-      } else if (event.type === "IssuesEvent" && event.payload.issue?.labels) {
-        event.payload.issue.labels.forEach((label: { name: string }) => {
-          labels.add(label.name)
-        })
-      }
-    })
-    return Array.from(labels).sort()
-  }
-
-  // Toggle label selection
-  const toggleLabelSelection = (label: string) => {
-    const newSelected = new Set(selectedLabels)
-    if (newSelected.has(label)) {
-      newSelected.delete(label)
-    } else {
-      newSelected.add(label)
-    }
-    setSelectedLabels(newSelected)
-  }
-
-  // Get count of active filters
-  const getActiveFilterCount = () => {
-    return selectedRepos.size + selectedEventTypes.size + selectedLabels.size
-  }
-
-  // Get filter description
-  const getFilterDescription = () => {
-    if (getActiveFilterCount() === 0) return "No filters"
-    
-    const parts = []
-    if (selectedRepos.size > 0) {
-      parts.push(`${selectedRepos.size} repository${selectedRepos.size > 1 ? 'ies' : ''}`)
-    }
-    if (selectedEventTypes.size > 0) {
-      parts.push(`${selectedEventTypes.size} event type${selectedEventTypes.size > 1 ? 's' : ''}`)
-    }
-    if (selectedLabels.size > 0) {
-      parts.push(`${selectedLabels.size} label${selectedLabels.size > 1 ? 's' : ''}`)
-    }
-    return parts.join(', ')
-  }
-
-  // Filter events by selected repositories, event types, and labels
-  const getFilteredEvents = (events: GitHubEvent[]): GitHubEvent[] => {
-    let filtered = events
-
-    // Filter by repository - show all repositories if none selected
-    if (selectedRepos.size > 0) {
-      filtered = filtered.filter(event => selectedRepos.has(event.repo.name))
-    }
-
-    // Filter by event type - show all event types if none selected
-    if (selectedEventTypes.size > 0) {
-      filtered = filtered.filter(event => {
-        return Array.from(selectedEventTypes).some(category => 
-          EVENT_TYPES[category as EventCategory].includes(event.type)
-        )
-      })
-    }
-
-    // Filter by labels - show all events if no labels selected
-    if (selectedLabels.size > 0) {
-      filtered = filtered.filter(event => {
-        if (event.type === "PullRequestEvent" && event.payload.pull_request?.labels) {
-          return event.payload.pull_request.labels.some((label: { name: string }) => 
-            selectedLabels.has(label.name)
-          )
-        }
-        if (event.type === "IssuesEvent" && event.payload.issue?.labels) {
-          return event.payload.issue.labels.some((label: { name: string }) => 
-            selectedLabels.has(label.name)
-          )
-        }
-        return false
-      })
-    }
-
-    return filtered
-  }
-
-  // Clear all filters
-  const clearAllFilters = () => {
-    setSelectedRepos(new Set())
-    setSelectedEventTypes(new Set())
-    setSelectedLabels(new Set())
-  }
-
-  // Update the theme toggle button to use the saved theme
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
       <header className="flex justify-between items-center mb-6">
@@ -1255,13 +1168,6 @@ export default function GitHubEventViewer() {
                 </Button>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {selectedEvents.size > 0 && (
-                <Button variant="outline" size="sm" onClick={() => setSelectedEvents(new Set())}>
-                  Deselect All
-                </Button>
-              )}
-            </div>
           </div>
 
           <div className="space-y-3">
@@ -1300,14 +1206,13 @@ export default function GitHubEventViewer() {
                                 key={event.id}
                                 className={cn(
                                   "overflow-hidden transition-all",
-                                  selectedEvents.has(event.id) && "border-primary",
                                   relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
                                 )}
                               >
                                 <CardContent className="p-0">
                                   <div
                                     className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                                    onClick={() => toggleEventSelection(event.id)}
+                                    onClick={() => toggleEventExpansion(event.id)}
                                   >
                                     <div className="text-lg mt-1" aria-hidden="true">
                                       {getEventEmoji(event.type)}
@@ -1384,14 +1289,13 @@ export default function GitHubEventViewer() {
                     key={event.id}
                     className={cn(
                       "overflow-hidden transition-all",
-                      selectedEvents.has(event.id) && "border-primary",
                       relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
                     )}
                   >
                     <CardContent className="p-0">
                       <div
                         className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                        onClick={() => toggleEventSelection(event.id)}
+                        onClick={() => toggleEventExpansion(event.id)}
                       >
                         <div className="text-lg mt-1" aria-hidden="true">
                           {getEventEmoji(event.type)}
@@ -1458,9 +1362,7 @@ export default function GitHubEventViewer() {
               // Report view
               <div className="prose dark:prose-invert max-w-none">
                 {(() => {
-                  const eventsToExport = getFilteredEvents(events).filter((event) => 
-                    selectedEvents.size === 0 || selectedEvents.has(event.id)
-                  )
+                  const eventsToExport = getFilteredEvents(events)
                   
                   // Get unique actors and their avatars
                   const actors = new Map<string, string>()
@@ -1487,11 +1389,114 @@ export default function GitHubEventViewer() {
                                 className="w-6 h-6 rounded-full"
                                 title={login}
                                 onClick={() => window.open(`https://github.com/${login}`, '_blank')}
+                                style={{ cursor: 'pointer' }}
                               />
                             ))}
                           </div>
                         </>
                       )}
+                      <div className="prose dark:prose-invert max-w-none">
+                        {(() => {
+                          const report = generateReport(eventsToExport)
+                          const lines = report.split('\n')
+                          
+                          const renderReport = () => {
+                            const result: JSX.Element[] = []
+                            let currentList: JSX.Element[] = []
+                            let currentLevel = 0
+                            
+                            lines.forEach((line, index) => {
+                              const indentMatch = line.match(/^\s*/)
+                              const indent = indentMatch ? indentMatch[0].length / 2 : 0
+                              const content = line.trim()
+                              
+                              // Match markdown links [text](url)
+                              const linkMatch = content.match(/\[(.*?)\]\((.*?)\)/)
+                              const contentElement = linkMatch ? (
+                                <>
+                                  {content.split(/\[.*?\]\(.*?\)/)[0]}
+                                  <a 
+                                    href={linkMatch[2]} 
+                                    className="text-sm font-medium hover:underline" 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                  >
+                                    {linkMatch[1]}
+                                  </a>
+                                  {content.split(/\[.*?\]\(.*?\)/)[1]}
+                                </>
+                              ) : content
+
+                              if (indent === 0) {
+                                // New top-level item
+                                if (currentList.length > 0) {
+                                  result.push(<ul key={`list-${index}`} className="pl-4 text-sm">{currentList}</ul>)
+                                  currentList = []
+                                }
+                                result.push(
+                                  <li key={index} className="font-semibold my-2">
+                                    {contentElement}
+                                  </li>
+                                )
+                                currentLevel = 0
+                              } else if (indent === 1) {
+                                // Subsection
+                                if (currentList.length > 0) {
+                                  result.push(<ul key={`list-${index}`} className="pl-4 text-sm">{currentList}</ul>)
+                                  currentList = []
+                                }
+                                result.push(
+                                  <li key={index} className="font-medium my-1">
+                                    {contentElement}
+                                    <ul className="pl-4 text-sm">
+                                      {currentList}
+                                    </ul>
+                                  </li>
+                                )
+                                currentList = []
+                                currentLevel = 1
+                              } else {
+                                // Item
+                                currentList.push(
+                                  <li key={index} className="my-1">
+                                    {contentElement}
+                                  </li>
+                                )
+                              }
+                            })
+
+                            // Add any remaining items
+                            if (currentList.length > 0) {
+                              result.push(<ul key="final-list" className="pl-4 text-sm">{currentList}</ul>)
+                            }
+
+                            return <ul className="pl-0">{result}</ul>
+                          }
+
+                          return (
+                            <div className="space-y-1">
+                              {renderReport()}
+                            </div>
+                          )
+                        })()}
+                      </div>
+                      <div className="mt-6 flex justify-center">
+                        <Button
+                          variant="default"
+                          size="lg"
+                          onClick={() => {
+                            const report = generateReport(eventsToExport)
+                            navigator.clipboard.writeText(report)
+                            toast({
+                              title: "Report copied",
+                              description: "The report has been copied to your clipboard",
+                            })
+                          }}
+                        >
+                          <ClipboardCopy className="mr-2 h-4 w-4" />
+                          Copy Report
+                        </Button>
+                      </div>
                     </>
                   )
                 })()}
@@ -1499,6 +1504,18 @@ export default function GitHubEventViewer() {
             )}
           </div>
         </>
+      )}
+
+      {events.length === 0 && usernames.length > 0 && !isSyncing && (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">No events found for these usernames and date range.</p>
+        </div>
+      )}
+
+      {!usernames.length && (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Enter GitHub usernames to view events.</p>
+        </div>
       )}
     </div>
   )
