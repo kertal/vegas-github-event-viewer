@@ -1,8 +1,6 @@
 "use client"
 
-import type React from "react"
-
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Moon, Sun, RefreshCw, ClipboardCopy, ChevronDown, ChevronUp } from "lucide-react"
 import { format, subDays } from "date-fns"
 import { Button } from "@/components/ui/button"
@@ -93,6 +91,25 @@ interface Commit {
   message: string
   sha: string
   url: string
+}
+
+// Add interface for report data
+interface ReportItem {
+  title: string
+  sections: {
+    title: string
+    items: {
+      title: string
+      url: string
+    }[]
+  }[]
+}
+
+// Add back the truncateMiddle function
+const truncateMiddle = (str: string, maxLength: number = 150): string => {
+  if (str.length <= maxLength) return str
+  const halfLength = Math.floor((maxLength - 3) / 2)
+  return `${str.slice(0, halfLength)}...${str.slice(-halfLength)}`
 }
 
 // Add function to categorize events
@@ -378,137 +395,6 @@ const getEventSummary = (event: GitHubEvent, relatedEvents?: RelatedEvents) => {
   }
 }
 
-// Add function to generate report
-const generateReport = (events: GitHubEvent[]) => {
-  const groups = groupEventsByCategoryAndNumber(events)
-  const report: string[] = []
-
-  // PRs section
-  const prGroups = Object.entries(groups["Pull Requests"])
-    .filter(([key]) => key !== 'other')
-    .map(([key, group]) => {
-      const activities = group.events.map(event => {
-        const eventInfo = getEventSummary(event)
-        // For single person, remove the actor name from the summary
-        const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
-        return allSameActor 
-          ? eventInfo.summary.replace(`${event.actor.login} `, '')
-          : eventInfo.summary
-      }).join(', ')
-      return { key, group, activities }
-    })
-
-  if (prGroups.length > 0) {
-    report.push('Pull Requests')
-
-    // Opened PRs
-    const openedPRs = prGroups.filter(({ activities }) => 
-      activities.includes('opened pull request') || 
-      activities.includes('created pull request')
-    )
-    if (openedPRs.length > 0) {
-      report.push('  Opened')
-      report.push(...openedPRs.map(({ key, group }) => 
-        `    [${group.title}](${group.url}) (${key})`
-      ))
-    }
-
-    // Reviewed PRs
-    const reviewedPRs = prGroups.filter(({ activities }) => 
-      activities.includes('reviewed') || 
-      activities.includes('commented on pull request')
-    )
-    if (reviewedPRs.length > 0) {
-      report.push('  Reviewed')
-      report.push(...reviewedPRs.map(({ key, group }) => 
-        `    [${group.title}](${group.url}) (${key})`
-      ))
-    }
-
-    // Closed PRs
-    const closedPRs = prGroups.filter(({ activities }) => 
-      activities.includes('closed pull request') || 
-      activities.includes('merged pull request')
-    )
-    if (closedPRs.length > 0) {
-      report.push('  Closed')
-      report.push(...closedPRs.map(({ key, group }) => 
-        `    [${group.title}](${group.url}) (${key})`
-      ))
-    }
-  }
-
-  // Issues section
-  const issueGroups = Object.entries(groups["Issues"])
-    .filter(([key]) => key !== 'other')
-    .map(([key, group]) => {
-      const activities = group.events.map(event => {
-        const eventInfo = getEventSummary(event)
-        // For single person, remove the actor name from the summary
-        const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
-        return allSameActor 
-          ? eventInfo.summary.replace(`${event.actor.login} `, '')
-          : eventInfo.summary
-      }).join(', ')
-      return { key, group, activities }
-    })
-
-  if (issueGroups.length > 0) {
-    report.push('Issues')
-
-    // Opened Issues
-    const openedIssues = issueGroups.filter(({ activities }) => 
-      activities.includes('opened issue') || 
-      activities.includes('created issue')
-    )
-    if (openedIssues.length > 0) {
-      report.push('  Opened')
-      report.push(...openedIssues.map(({ key, group }) => 
-        `    [${group.title}](${group.url}) (${key})`
-      ))
-    }
-
-    // Commented Issues
-    const commentedIssues = issueGroups.filter(({ activities }) => 
-      activities.includes('commented on issue')
-    )
-    if (commentedIssues.length > 0) {
-      report.push('  Commented')
-      report.push(...commentedIssues.map(({ key, group }) => 
-        `    [${group.title}](${group.url}) (${key})`
-      ))
-    }
-
-    // Closed Issues
-    const closedIssues = issueGroups.filter(({ activities }) => 
-      activities.includes('closed issue')
-    )
-    if (closedIssues.length > 0) {
-      report.push('  Closed')
-      report.push(...closedIssues.map(({ key, group }) => 
-        `    [${group.title}](${group.url}) (${key})`
-      ))
-    }
-  }
-
-  // Other section
-  const otherEvents = groups["Other"].other.events.map(event => {
-    const eventInfo = getEventSummary(event)
-    // For single person, remove the actor name from the summary
-    const allSameActor = groups["Other"].other.events.every(e => e.actor.login === event.actor.login)
-    return allSameActor 
-      ? eventInfo.summary.replace(`${event.actor.login} `, '')
-      : eventInfo.summary
-  })
-
-  if (otherEvents.length > 0) {
-    report.push('Other Activity')
-    report.push(...otherEvents.map(event => `  ${event}`))
-  }
-
-  return report.join('\n')
-}
-
 export default function GitHubEventViewer() {
   // State
   const [events, setEvents] = useState<GitHubEvent[]>([])
@@ -531,6 +417,18 @@ export default function GitHubEventViewer() {
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
+
+  // Add interface for report data
+  interface ReportItem {
+    title: string
+    sections: {
+      title: string
+      items: {
+        title: string
+        url: string
+      }[]
+    }[]
+  }
 
   // Load user preferences from localStorage on mount
   useEffect(() => {
@@ -571,6 +469,13 @@ export default function GitHubEventViewer() {
       setLastSynced(lastSync)
     }
   }, [])
+
+  // Add effect to trigger fetchEvents when usernames are loaded
+  useEffect(() => {
+    if (usernames.length > 0) {
+      fetchEvents()
+    }
+  }, [usernames]) // Only trigger when usernames change
 
   // Save preferences to localStorage when they change
   useEffect(() => {
@@ -929,6 +834,278 @@ export default function GitHubEventViewer() {
     }
   }
 
+  // Add function to prepare report data
+  const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
+    const groups = groupEventsByCategoryAndNumber(events)
+    const report: ReportItem[] = []
+
+    // PRs section
+    const prGroups = Object.entries(groups["Pull Requests"])
+      .filter(([key]) => key !== 'other')
+      .map(([key, group]) => {
+        const activities = group.events.map(event => {
+          const eventInfo = getEventSummary(event)
+          const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
+          return allSameActor 
+            ? eventInfo.summary.replace(`${event.actor.login} `, '')
+            : eventInfo.summary
+        }).join(', ')
+        return { key, group, activities }
+      })
+
+    if (prGroups.length > 0) {
+      const prSections = []
+
+      // Opened PRs
+      const openedPRs = prGroups.filter(({ activities }) => 
+        activities.includes('opened pull request') || 
+        activities.includes('created pull request')
+      )
+      if (openedPRs.length > 0) {
+        prSections.push({
+          title: 'Opened',
+          items: openedPRs.map(({ key, group }) => ({
+            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
+            url: group.url
+          }))
+        })
+      }
+
+      // Reviewed PRs
+      const reviewedPRs = prGroups.filter(({ group }) =>
+        group.events.some(
+          e =>
+            e.type === 'PullRequestReviewEvent' ||
+            e.type === 'PullRequestReviewCommentEvent'
+        )
+      )
+      if (reviewedPRs.length > 0) {
+        prSections.push({
+          title: 'Reviewed',
+          items: reviewedPRs.map(({ key, group }) => ({
+            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
+            url: group.url
+          }))
+        })
+      }
+
+      // Closed PRs
+      const closedPRs = prGroups.filter(({ activities }) => 
+        activities.includes('closed pull request') || 
+        activities.includes('merged pull request')
+      )
+      if (closedPRs.length > 0) {
+        prSections.push({
+          title: 'Closed',
+          items: closedPRs.map(({ key, group }) => ({
+            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
+            url: group.url
+          }))
+        })
+      }
+
+      if (prSections.length > 0) {
+        report.push({
+          title: 'Pull Requests',
+          sections: prSections
+        })
+      }
+    }
+
+    // Issues section
+    const issueGroups = Object.entries(groups["Issues"])
+      .filter(([key]) => key !== 'other')
+      .map(([key, group]) => {
+        const activities = group.events.map(event => {
+          const eventInfo = getEventSummary(event)
+          const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
+          return allSameActor 
+            ? eventInfo.summary.replace(`${event.actor.login} `, '')
+            : eventInfo.summary
+        }).join(', ')
+        return { key, group, activities }
+      })
+
+    if (issueGroups.length > 0) {
+      const issueSections = []
+
+      // Opened Issues
+      const openedIssues = issueGroups.filter(({ activities }) => 
+        activities.includes('opened issue') || 
+        activities.includes('created issue')
+      )
+      if (openedIssues.length > 0) {
+        issueSections.push({
+          title: 'Opened',
+          items: openedIssues.map(({ key, group }) => ({
+            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
+            url: group.url
+          }))
+        })
+      }
+
+      // Commented Issues
+      const commentedIssues = issueGroups.filter(({ activities }) => 
+        activities.includes('commented on issue')
+      )
+      if (commentedIssues.length > 0) {
+        issueSections.push({
+          title: 'Commented',
+          items: commentedIssues.map(({ key, group }) => ({
+            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
+            url: group.url
+          }))
+        })
+      }
+
+      // Closed Issues
+      const closedIssues = issueGroups.filter(({ activities }) => 
+        activities.includes('closed issue')
+      )
+      if (closedIssues.length > 0) {
+        issueSections.push({
+          title: 'Closed',
+          items: closedIssues.map(({ key, group }) => ({
+            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
+            url: group.url
+          }))
+        })
+      }
+
+      if (issueSections.length > 0) {
+        report.push({
+          title: 'Issues',
+          sections: issueSections
+        })
+      }
+    }
+
+    return report
+  }
+
+  // Add function to format report for Slack
+  const formatReportForSlack = (report: ReportItem[]): string => {
+    const header = `> GitHub Activity Report\n> ${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}\n\n`
+    
+    const content = report.map(item => {
+      const sections = item.sections.map(section => {
+        const items = section.items.map(item => `• <${item.url}|${item.title}>`).join('\n')
+        return `_${section.title}_\n${items}`
+      }).join('\n\n')
+      return `*${item.title}*\n${sections}`
+    }).join('\n\n')
+
+    return header + content
+  }
+
+  // Update the copy report functionality to use rich text
+  const copyReport = async () => {
+    const eventsToExport = getFilteredEvents(events)
+    const reportData = prepareReportData(eventsToExport)
+    
+    // Create HTML version of the report
+    const htmlContent = `:github:
+
+        <p>${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}</p>
+        ${reportData.map(item => `
+          <ul>
+            <li>${item.title}</li>
+            ${item.sections.map(section => `
+              <ul>
+                <li>${section.title}</li>
+                <ul>
+                  ${section.items.map(listItem => {
+                    // Determine emoji based on section title and item title
+                    let emoji = '📋' // default emoji
+                    if (item.title === 'Pull Requests') {
+                      if (section.title === 'Opened') emoji = '🔀'
+                      else if (section.title === 'Reviewed') emoji = '👀'
+                      else if (section.title === 'Closed') emoji = '✅'
+                    } else if (item.title === 'Issues') {
+                      if (section.title === 'Opened') emoji = '❓'
+                      else if (section.title === 'Commented') emoji = '💬'
+                      else if (section.title === 'Closed') emoji = '✅'
+                    }
+                    return `
+                      <li>
+                       :flaky-test-monster-lego: <a href="${listItem.url}">${emoji} ${listItem.title}</a>
+                      </li>
+                    `
+                  }).join('')}
+                </ul>
+              </ul>
+            `).join('')}
+          </ul>
+        `).join('')}
+      
+    `
+
+    // Create plain text version (Slack format)
+    const plainText = formatReportForSlack(reportData)
+
+    // Create Blob items for each mime type
+    const blobHtml = new Blob([htmlContent], { type: 'text/html' })
+    const blobPlain = new Blob([plainText], { type: 'text/plain' })
+
+    const clipboardItemInput = {
+      'text/html': blobHtml,
+      'text/plain': blobPlain
+    }
+
+    try {
+      // Write to clipboard
+      await navigator.clipboard.write([
+        new ClipboardItem(clipboardItemInput)
+      ])
+      
+      toast({
+        title: "Report copied",
+        description: "The report has been copied to your clipboard in both rich text and Slack format",
+      })
+    } catch (err) {
+      console.error('Copy failed:', err)
+      toast({
+        title: "Copy failed",
+        description: "Failed to copy the report to clipboard",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Update the renderReport function to use the new data structure
+  const renderReport = () => {
+    const eventsToExport = getFilteredEvents(events)
+    const reportData = prepareReportData(eventsToExport)
+    
+    return (
+      <div className="space-y-1">
+        <ul className="pl-0">
+          {reportData.map((item, index) => (
+            <li key={index} className="mb-4">
+              <div className="font-semibold text-lg mb-2">{item.title}</div>
+              <ul className="pl-4 space-y-2 list-disc">
+                {item.sections.map((section, sectionIndex) => (
+                  <li key={sectionIndex} className="mb-2">
+                    <div className="font-medium text-base mb-1">{section.title}</div>
+                    <ul className="pl-4 space-y-1 list-disc">
+                      {section.items.map((listItem, listIndex) => (
+                        <li key={listIndex} className="text-sm">
+                          <a href={listItem.url} target="_blank" rel="noopener noreferrer">
+                            {listItem.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
       <header className="flex justify-between items-center mb-6">
@@ -1195,7 +1372,7 @@ export default function GitHubEventViewer() {
                                 rel="noopener noreferrer"
                                 className="text-xs font-medium text-muted-foreground hover:underline"
                               >
-                                {number}: {group.title}
+                                {truncateMiddle(group.title)}
                               </a>
                             </div>
                           )}
@@ -1239,12 +1416,12 @@ export default function GitHubEventViewer() {
                                           className="text-sm font-medium hover:underline truncate"
                                           onClick={(e) => e.stopPropagation()}
                                         >
-                                          {eventInfo.summary}
+                                          {truncateMiddle(eventInfo.summary)}
                                         </a>
                                       </div>
                                       {eventInfo.title && number === 'other' && (
                                         <div className="text-xs text-muted-foreground truncate mt-0.5">
-                                          {eventInfo.title}
+                                          {truncateMiddle(eventInfo.title)}
                                         </div>
                                       )}
                                     </div>
@@ -1322,12 +1499,12 @@ export default function GitHubEventViewer() {
                               className="text-sm font-medium hover:underline truncate"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {eventInfo.summary}
+                              {truncateMiddle(eventInfo.summary)}
                             </a>
                           </div>
                           {eventInfo.title && (
                             <div className="text-xs text-muted-foreground truncate mt-0.5">
-                              {eventInfo.title}
+                              {truncateMiddle(eventInfo.title)}
                             </div>
                           )}
                         </div>
@@ -1398,82 +1575,6 @@ export default function GitHubEventViewer() {
                       )}
                       <div className="prose dark:prose-invert max-w-none">
                         {(() => {
-                          const report = generateReport(eventsToExport)
-                          const lines = report.split('\n')
-                          
-                          const renderReport = () => {
-                            const result: JSX.Element[] = []
-                            let currentList: JSX.Element[] = []
-                            let currentLevel = 0
-                            
-                            lines.forEach((line, index) => {
-                              const indentMatch = line.match(/^\s*/)
-                              const indent = indentMatch ? indentMatch[0].length / 2 : 0
-                              const content = line.trim()
-                              
-                              // Match markdown links [text](url)
-                              const linkMatch = content.match(/\[(.*?)\]\((.*?)\)/)
-                              const contentElement = linkMatch ? (
-                                <>
-                                  {content.split(/\[.*?\]\(.*?\)/)[0]}
-                                  <a 
-                                    href={linkMatch[2]} 
-                                    className="text-sm font-medium hover:underline" 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                  >
-                                    {linkMatch[1]}
-                                  </a>
-                                  {content.split(/\[.*?\]\(.*?\)/)[1]}
-                                </>
-                              ) : content
-
-                              if (indent === 0) {
-                                // New top-level item
-                                if (currentList.length > 0) {
-                                  result.push(<ul key={`list-${index}`} className="pl-4 text-sm">{currentList}</ul>)
-                                  currentList = []
-                                }
-                                result.push(
-                                  <li key={index} className="font-semibold my-2">
-                                    {contentElement}
-                                  </li>
-                                )
-                                currentLevel = 0
-                              } else if (indent === 1) {
-                                // Subsection
-                                if (currentList.length > 0) {
-                                  result.push(<ul key={`list-${index}`} className="pl-4 text-sm">{currentList}</ul>)
-                                  currentList = []
-                                }
-                                result.push(
-                                  <li key={index} className="font-medium my-1">
-                                    {contentElement}
-                                    <ul className="pl-4 text-sm">
-                                      {currentList}
-                                    </ul>
-                                  </li>
-                                )
-                                currentList = []
-                                currentLevel = 1
-                              } else {
-                                // Item
-                                currentList.push(
-                                  <li key={index} className="my-1">
-                                    {contentElement}
-                                  </li>
-                                )
-                              }
-                            })
-
-                            // Add any remaining items
-                            if (currentList.length > 0) {
-                              result.push(<ul key="final-list" className="pl-4 text-sm">{currentList}</ul>)
-                            }
-
-                            return <ul className="pl-0">{result}</ul>
-                          }
-
                           return (
                             <div className="space-y-1">
                               {renderReport()}
@@ -1485,17 +1586,10 @@ export default function GitHubEventViewer() {
                         <Button
                           variant="default"
                           size="lg"
-                          onClick={() => {
-                            const report = generateReport(eventsToExport)
-                            navigator.clipboard.writeText(report)
-                            toast({
-                              title: "Report copied",
-                              description: "The report has been copied to your clipboard",
-                            })
-                          }}
+                          onClick={copyReport}
                         >
                           <ClipboardCopy className="mr-2 h-4 w-4" />
-                          Copy Report
+                          Export to Slack
                         </Button>
                       </div>
                     </>
