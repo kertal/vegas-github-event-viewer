@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react"
 import { Moon, Sun, RefreshCw, ClipboardCopy, ChevronDown, ChevronUp } from "lucide-react"
 import { format, subDays } from "date-fns"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -175,9 +176,24 @@ const findPRReferences = (commitMessage: string, repo: string): { number: number
   return null
 }
 
-
+// Add function to safely parse usernames
+const parseUsernames = (input: string): string[] => {
+  // Split by comma and clean up each username
+  return input
+    .split(',')
+    .map(name => name.trim())
+    // Only allow valid GitHub usernames (alphanumeric and hyphens, 1-39 chars)
+    .filter(name => /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(name))
+    // Remove duplicates
+    .filter((name, index, self) => self.indexOf(name) === index)
+    // Limit to reasonable number of usernames
+    .slice(0, 10)
+}
 
 export default function GitHubEventViewer() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  
   // State
   const [events, setEvents] = useState<GitHubEvent[]>([])
   const [usernames, setUsernames] = useState<string[]>([])
@@ -199,14 +215,37 @@ export default function GitHubEventViewer() {
   const { toast } = useToast()
 
 
-  // Load user preferences from localStorage on mount
+  // Load user preferences and handle URL parameters
   useEffect(() => {
+    // Get usernames from URL first
+    const urlUsernames = searchParams.get('usernames')
+    const parsedUrlUsernames = urlUsernames ? parseUsernames(urlUsernames) : []
+    
+    // If URL has valid usernames, use them
+    if (parsedUrlUsernames.length > 0) {
+      setUsernames(parsedUrlUsernames)
+      setUsernameInput(parsedUrlUsernames.join(', '))
+    } else {
+      // Otherwise, try to load from localStorage
+      const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
+      if (savedPrefs) {
+        try {
+          const prefs: UserPreferences = JSON.parse(savedPrefs)
+          if (prefs.usernames && prefs.usernames.length > 0) {
+            setUsernames(prefs.usernames)
+            setUsernameInput(prefs.usernames.join(', '))
+          }
+        } catch (error) {
+          console.error("Error parsing saved preferences:", error)
+        }
+      }
+    }
+
+    // Load other preferences from localStorage
     const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
     if (savedPrefs) {
       try {
         const prefs: UserPreferences = JSON.parse(savedPrefs)
-        setUsernames(prefs.usernames || [])
-        setUsernameInput(prefs.usernames?.join(", ") || "")
         setStartDate(prefs.startDate ? new Date(prefs.startDate) : subDays(new Date(), 4))
         setEndDate(prefs.endDate ? new Date(prefs.endDate) : new Date())
         setViewMode(prefs.viewMode || "grouped")
@@ -237,7 +276,20 @@ export default function GitHubEventViewer() {
     if (lastSync) {
       setLastSynced(lastSync)
     }
-  }, [])
+  }, [searchParams]) // Add searchParams as dependency
+
+  // Update URL when usernames change
+  useEffect(() => {
+    if (usernames.length > 0) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('usernames', usernames.join(','))
+      router.push(`?${params.toString()}`)
+    } else {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete('usernames')
+      router.push(`?${params.toString()}`)
+    }
+  }, [usernames, router, searchParams])
 
   // Add effect to trigger fetchEvents when usernames are loaded
   useEffect(() => {
@@ -344,11 +396,7 @@ export default function GitHubEventViewer() {
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    // Parse usernames from input
-    const newUsernames = usernameInput
-      .split(",")
-      .map(name => name.trim())
-      .filter(name => name.length > 0)
+    const newUsernames = parseUsernames(usernameInput)
     setUsernames(newUsernames)
     fetchEvents()
   }
