@@ -659,7 +659,7 @@ export default function GitHubEventViewer() {
     // Create HTML version of the report
     const htmlContent = `
       <div>
-        <b>*GitHub Activity Report*</b>
+        <b>GitHub Activity Report</b>
         <p>${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}</p>
         ${reportData.map(item => `
           <ul>

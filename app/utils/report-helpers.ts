@@ -1,6 +1,13 @@
 import { GitHubEvent, ReportItem } from '../types/github'
 import { getEventEmoji } from './event-helpers'
 
+// Add truncateMiddle function
+const truncateMiddle = (str: string, maxLength: number = 120): string => {
+  if (str.length <= maxLength) return str
+  const halfLength = Math.floor((maxLength - 3) / 2)
+  return `${str.slice(0, halfLength)}...${str.slice(-halfLength)}`
+}
+
 // Add function to prepare report data
 export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
   const prEvents = events.filter(e => e.type === "PullRequestEvent")
@@ -24,7 +31,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         prEvents
           .filter(e => e.payload.action === "opened")
           .map(e => ({
-            title: e.payload.pull_request?.title || "",
+            title: truncateMiddle(e.payload.pull_request?.title || ""),
             url: e.payload.pull_request?.html_url || ""
           }))
       )
@@ -35,7 +42,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         events
           .filter(e => e.type === "PullRequestReviewEvent")
           .map(e => ({
-            title: e.payload.pull_request?.title || "",
+            title: truncateMiddle(e.payload.pull_request?.title || ""),
             url: e.payload.pull_request?.html_url || ""
           }))
       )
@@ -46,7 +53,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         prEvents
           .filter(e => e.payload.action === "closed")
           .map(e => ({
-            title: e.payload.pull_request?.title || "",
+            title: truncateMiddle(e.payload.pull_request?.title || ""),
             url: e.payload.pull_request?.html_url || ""
           }))
       )
@@ -60,7 +67,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         issueEvents
           .filter(e => e.payload.action === "opened")
           .map(e => ({
-            title: e.payload.issue?.title || "",
+            title: truncateMiddle(e.payload.issue?.title || ""),
             url: e.payload.issue?.html_url || ""
           }))
       )
@@ -71,7 +78,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         events
           .filter(e => e.type === "IssueCommentEvent")
           .map(e => ({
-            title: e.payload.issue?.title || "",
+            title: truncateMiddle(e.payload.issue?.title || ""),
             url: e.payload.comment?.html_url || ""
           }))
       )
@@ -82,7 +89,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         issueEvents
           .filter(e => e.payload.action === "closed")
           .map(e => ({
-            title: e.payload.issue?.title || "",
+            title: truncateMiddle(e.payload.issue?.title || ""),
             url: e.payload.issue?.html_url || ""
           }))
       )
