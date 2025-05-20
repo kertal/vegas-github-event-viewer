@@ -11,29 +11,11 @@ import { Calendar } from "@/components/ui/calendar"
 import { useToast } from "@/hooks/use-toast"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
+import { GitHubEvent, EventCategory, ViewMode, UserPreferences } from "./types/github"
+import { getEventCategory, groupEventsByCategoryAndNumber, groupRelatedEventsForTimeline, getEventSummary } from "./utils/event-helpers"
+import { prepareReportData, formatReportForSlack } from "./utils/report-helpers"
 
-// Types
-interface GitHubEvent {
-  id: string
-  type: string
-  created_at: string
-  actor: {
-    login: string
-    avatar_url: string
-    url: string
-  }
-  repo: {
-    name: string
-    url: string
-  }
-  payload: any
-}
 
-// Add event category type
-type EventCategory = "Pull Requests" | "Issues" | "Commits" | "Repository" | "Other"
-
-// Add view mode type
-type ViewMode = "grouped" | "timeline" | "report"
 
 // Add event type constants
 const EVENT_TYPES: Record<EventCategory, string[]> = {
@@ -65,19 +47,6 @@ const EVENT_TYPES: Record<EventCategory, string[]> = {
   ]
 }
 
-// Update the UserPreferences interface to include selectedEvents, expandedEvents, and viewMode
-interface UserPreferences {
-  usernames: string[]
-  startDate: string
-  endDate: string
-  expandedEvents: string[]
-  lastTheme: string
-  viewMode: ViewMode
-  selectedRepos: string[]
-  selectedEventTypes: string[]
-  selectedLabels: string[]
-  showFilters: boolean
-}
 
 // Add interface for related events
 interface RelatedEvents {
@@ -113,26 +82,6 @@ const truncateMiddle = (str: string, maxLength: number = 150): string => {
 }
 
 // Add function to categorize events
-const getEventCategory = (event: GitHubEvent): EventCategory => {
-  const prEvents = [
-    "PullRequestEvent",
-    "PullRequestReviewEvent",
-    "PullRequestReviewCommentEvent",
-    "PushEvent"
-  ]
-  
-  const issueEvents = [
-    "IssuesEvent",
-    "IssueCommentEvent"
-  ]
-
-  if (prEvents.includes(event.type)) {
-    return "Pull Requests"
-  } else if (issueEvents.includes(event.type)) {
-    return "Issues"
-  }
-  return "Other"
-}
 
 // Add function to group events by category
 const groupEventsByCategory = (events: GitHubEvent[]) => {
@@ -146,64 +95,6 @@ const groupEventsByCategory = (events: GitHubEvent[]) => {
   }, {} as Record<EventCategory, GitHubEvent[]>)
 }
 
-// Add function to group events by category and number
-const groupEventsByCategoryAndNumber = (events: GitHubEvent[]) => {
-  const categoryGroups = groupEventsByCategory(events)
-  const result: Record<EventCategory, Record<string, { events: GitHubEvent[], title: string, url: string }>> = {
-    "Pull Requests": {},
-    "Issues": {},
-    "Commits": {},
-    "Repository": {},
-    "Other": {}
-  }
-
-  // Group PR events by PR number
-  categoryGroups["Pull Requests"]?.forEach(event => {
-    const prNumber = event.payload.pull_request?.number
-    if (prNumber) {
-      const key = `PR #${prNumber}`
-      if (!result["Pull Requests"][key]) {
-        result["Pull Requests"][key] = {
-          events: [],
-          title: event.payload.pull_request?.title || "",
-          url: event.payload.pull_request?.html_url || `https://github.com/${event.repo.name}/pull/${prNumber}`
-        }
-      }
-      result["Pull Requests"][key].events.push(event)
-    } else {
-      if (!result["Pull Requests"]['other']) {
-        result["Pull Requests"]['other'] = { events: [], title: "", url: "" }
-      }
-      result["Pull Requests"]['other'].events.push(event)
-    }
-  })
-
-  // Group Issue events by issue number
-  categoryGroups["Issues"]?.forEach(event => {
-    const issueNumber = event.payload.issue?.number
-    if (issueNumber) {
-      const key = `Issue #${issueNumber}`
-      if (!result["Issues"][key]) {
-        result["Issues"][key] = {
-          events: [],
-          title: event.payload.issue?.title || "",
-          url: event.payload.issue?.html_url || `https://github.com/${event.repo.name}/issues/${issueNumber}`
-        }
-      }
-      result["Issues"][key].events.push(event)
-    } else {
-      if (!result["Issues"]['other']) {
-        result["Issues"]['other'] = { events: [], title: "", url: "" }
-      }
-      result["Issues"]['other'].events.push(event)
-    }
-  })
-
-  // Keep Other events as is
-  result["Other"] = { 'other': { events: categoryGroups["Other"] || [], title: "", url: "" } }
-
-  return result
-}
 
 // Add function to find related events
 const findRelatedEvents = (events: GitHubEvent[]): Map<string, RelatedEvents> => {
@@ -269,35 +160,6 @@ const findRelatedEvents = (events: GitHubEvent[]): Map<string, RelatedEvents> =>
   return relatedEvents
 }
 
-// Add function to group events for timeline view
-const groupRelatedEventsForTimeline = (events: GitHubEvent[]): GitHubEvent[] => {
-  const relatedEvents = findRelatedEvents(events)
-  const processedEvents = new Set<string>()
-  const timelineEvents: GitHubEvent[] = []
-
-  events.forEach(event => {
-    if (processedEvents.has(event.id)) return
-
-    const key = `${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`
-    const related = relatedEvents.get(key)
-
-    if (related?.pr && related?.issue) {
-      // Add both related events together
-      timelineEvents.push(related.issue, related.pr)
-      processedEvents.add(related.issue.id)
-      processedEvents.add(related.pr.id)
-    } else {
-      // Add single event
-      timelineEvents.push(event)
-      processedEvents.add(event.id)
-    }
-  })
-
-  // Sort by date
-  return timelineEvents.sort((a, b) => 
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  )
-}
 
 // Add function to find PR references in commit messages
 const findPRReferences = (commitMessage: string, repo: string): { number: number; url: string } | null => {
@@ -313,87 +175,7 @@ const findPRReferences = (commitMessage: string, repo: string): { number: number
   return null
 }
 
-// Get human-friendly summary for event
-const getEventSummary = (event: GitHubEvent, relatedEvents?: RelatedEvents) => {
-  const actor = event.actor.login
-  const repo = event.repo.name
 
-  switch (event.type) {
-    case "CreateEvent":
-      return {
-        summary: `${actor} created ${event.payload.ref_type} ${event.payload.ref || ""} in ${repo}`,
-        title: event.payload.ref || ""
-      }
-    case "PushEvent": {
-      const commits = (event.payload.commits || []) as Commit[]
-      const prRefs = commits
-        .map(commit => findPRReferences(commit.message, repo))
-        .filter((ref): ref is { number: number; url: string } => ref !== null)
-      
-      const prInfo = prRefs.length > 0 
-        ? `PR #${prRefs.map(ref => ref.number).join(", #")}`
-        : event.payload.head || ""
-
-      return {
-        summary: `${actor} pushed ${event.payload.size} commit(s) to ${repo}`,
-        title: prInfo
-      }
-    }
-    case "IssuesEvent":
-      const issueNumber = event.payload.issue?.number
-      const issueTitle = event.payload.issue?.title || ""
-      const closedByPR = relatedEvents?.pr
-      return {
-        summary: `${actor} ${event.payload.action} issue in ${repo}`,
-        title: `#${issueNumber} ${issueTitle}${closedByPR ? ` (closed by PR #${closedByPR.payload.pull_request.number})` : ""}`
-      }
-    case "PullRequestEvent":
-      const prNumber = event.payload.pull_request?.number
-      const prTitle = event.payload.pull_request?.title || ""
-      const closesIssue = relatedEvents?.issue
-      return {
-        summary: `${actor} ${event.payload.action} pull request in ${repo}`,
-        title: `#${prNumber} ${prTitle}${closesIssue ? ` (closes issue #${closesIssue.payload.issue.number})` : ""}`
-      }
-    case "PullRequestReviewEvent":
-      const reviewPrNumber = event.payload.pull_request?.number
-      const reviewPrTitle = event.payload.pull_request?.title || ""
-      return {
-        summary: `${actor} ${event.payload.action} review on pull request in ${repo}`,
-        title: `#${reviewPrNumber} ${reviewPrTitle}`
-      }
-    case "IssueCommentEvent":
-      return {
-        summary: `${actor} commented on issue in ${repo}`,
-        title: `#${event.payload.issue?.number} ${event.payload.issue?.title || ""}`
-      }
-    case "WatchEvent":
-      return {
-        summary: `${actor} starred ${repo}`,
-        title: ""
-      }
-    case "ForkEvent":
-      return {
-        summary: `${actor} forked ${repo}`,
-        title: ""
-      }
-    case "DeleteEvent":
-      return {
-        summary: `${actor} deleted ${event.payload.ref_type} ${event.payload.ref} in ${repo}`,
-        title: event.payload.ref || ""
-      }
-    case "ReleaseEvent":
-      return {
-        summary: `${actor} released ${event.payload.release?.name || "a new version"} in ${repo}`,
-        title: event.payload.release?.name || ""
-      }
-    default:
-      return {
-        summary: `${actor} performed ${event.type.replace("Event", "")} on ${repo}`,
-        title: ""
-      }
-  }
-}
 
 export default function GitHubEventViewer() {
   // State
@@ -407,8 +189,6 @@ export default function GitHubEventViewer() {
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<ViewMode>("grouped")
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
-  const [showReport, setShowReport] = useState(false)
-  const [showReportPreview, setShowReportPreview] = useState(false)
   const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
   const [showFilters, setShowFilters] = useState(true)
   const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
@@ -418,17 +198,6 @@ export default function GitHubEventViewer() {
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
 
-  // Add interface for report data
-  interface ReportItem {
-    title: string
-    sections: {
-      title: string
-      items: {
-        title: string
-        url: string
-      }[]
-    }[]
-  }
 
   // Load user preferences from localStorage on mount
   useEffect(() => {
@@ -834,178 +603,15 @@ export default function GitHubEventViewer() {
     }
   }
 
-  // Add function to prepare report data
-  const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
-    const groups = groupEventsByCategoryAndNumber(events)
-    const report: ReportItem[] = []
-
-    // PRs section
-    const prGroups = Object.entries(groups["Pull Requests"])
-      .filter(([key]) => key !== 'other')
-      .map(([key, group]) => {
-        const activities = group.events.map(event => {
-          const eventInfo = getEventSummary(event)
-          const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
-          return allSameActor 
-            ? eventInfo.summary.replace(`${event.actor.login} `, '')
-            : eventInfo.summary
-        }).join(', ')
-        return { key, group, activities }
-      })
-
-    if (prGroups.length > 0) {
-      const prSections = []
-
-      // Opened PRs
-      const openedPRs = prGroups.filter(({ activities }) => 
-        activities.includes('opened pull request') || 
-        activities.includes('created pull request')
-      )
-      if (openedPRs.length > 0) {
-        prSections.push({
-          title: 'Opened',
-          items: openedPRs.map(({ key, group }) => ({
-            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
-            url: group.url
-          }))
-        })
-      }
-
-      // Reviewed PRs
-      const reviewedPRs = prGroups.filter(({ group }) =>
-        group.events.some(
-          e =>
-            e.type === 'PullRequestReviewEvent' ||
-            e.type === 'PullRequestReviewCommentEvent'
-        )
-      )
-      if (reviewedPRs.length > 0) {
-        prSections.push({
-          title: 'Reviewed',
-          items: reviewedPRs.map(({ key, group }) => ({
-            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
-            url: group.url
-          }))
-        })
-      }
-
-      // Closed PRs
-      const closedPRs = prGroups.filter(({ activities }) => 
-        activities.includes('closed pull request') || 
-        activities.includes('merged pull request')
-      )
-      if (closedPRs.length > 0) {
-        prSections.push({
-          title: 'Closed',
-          items: closedPRs.map(({ key, group }) => ({
-            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
-            url: group.url
-          }))
-        })
-      }
-
-      if (prSections.length > 0) {
-        report.push({
-          title: 'Pull Requests',
-          sections: prSections
-        })
-      }
-    }
-
-    // Issues section
-    const issueGroups = Object.entries(groups["Issues"])
-      .filter(([key]) => key !== 'other')
-      .map(([key, group]) => {
-        const activities = group.events.map(event => {
-          const eventInfo = getEventSummary(event)
-          const allSameActor = group.events.every(e => e.actor.login === event.actor.login)
-          return allSameActor 
-            ? eventInfo.summary.replace(`${event.actor.login} `, '')
-            : eventInfo.summary
-        }).join(', ')
-        return { key, group, activities }
-      })
-
-    if (issueGroups.length > 0) {
-      const issueSections = []
-
-      // Opened Issues
-      const openedIssues = issueGroups.filter(({ activities }) => 
-        activities.includes('opened issue') || 
-        activities.includes('created issue')
-      )
-      if (openedIssues.length > 0) {
-        issueSections.push({
-          title: 'Opened',
-          items: openedIssues.map(({ key, group }) => ({
-            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
-            url: group.url
-          }))
-        })
-      }
-
-      // Commented Issues
-      const commentedIssues = issueGroups.filter(({ activities }) => 
-        activities.includes('commented on issue')
-      )
-      if (commentedIssues.length > 0) {
-        issueSections.push({
-          title: 'Commented',
-          items: commentedIssues.map(({ key, group }) => ({
-            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
-            url: group.url
-          }))
-        })
-      }
-
-      // Closed Issues
-      const closedIssues = issueGroups.filter(({ activities }) => 
-        activities.includes('closed issue')
-      )
-      if (closedIssues.length > 0) {
-        issueSections.push({
-          title: 'Closed',
-          items: closedIssues.map(({ key, group }) => ({
-            title: `${truncateMiddle(group.title)} ${key.match(/#\d+/)?.[0] || key}`,
-            url: group.url
-          }))
-        })
-      }
-
-      if (issueSections.length > 0) {
-        report.push({
-          title: 'Issues',
-          sections: issueSections
-        })
-      }
-    }
-
-    return report
-  }
-
-  // Add function to format report for Slack
-  const formatReportForSlack = (report: ReportItem[]): string => {
-    const header = `> GitHub Activity Report\n> ${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}\n\n`
-    
-    const content = report.map(item => {
-      const sections = item.sections.map(section => {
-        const items = section.items.map(item => `• <${item.url}|${item.title}>`).join('\n')
-        return `_${section.title}_\n${items}`
-      }).join('\n\n')
-      return `*${item.title}*\n${sections}`
-    }).join('\n\n')
-
-    return header + content
-  }
-
   // Update the copy report functionality to use rich text
   const copyReport = async () => {
     const eventsToExport = getFilteredEvents(events)
     const reportData = prepareReportData(eventsToExport)
     
     // Create HTML version of the report
-    const htmlContent = `:github:
-
+    const htmlContent = `
+      <div>
+        <b>*GitHub Activity Report*</b>
         <p>${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}</p>
         ${reportData.map(item => `
           <ul>
@@ -1028,7 +634,7 @@ export default function GitHubEventViewer() {
                     }
                     return `
                       <li>
-                       :flaky-test-monster-lego: <a href="${listItem.url}">${emoji} ${listItem.title}</a>
+                        <a href="${listItem.url}">${emoji} ${listItem.title}</a>
                       </li>
                     `
                   }).join('')}
@@ -1037,7 +643,7 @@ export default function GitHubEventViewer() {
             `).join('')}
           </ul>
         `).join('')}
-      
+      </div>
     `
 
     // Create plain text version (Slack format)
@@ -1076,6 +682,14 @@ export default function GitHubEventViewer() {
   const renderReport = () => {
     const eventsToExport = getFilteredEvents(events)
     const reportData = prepareReportData(eventsToExport)
+    
+    if (reportData.length === 0) {
+      return (
+        <div className="text-center py-4 text-muted-foreground">
+          No activity to report in this time range.
+        </div>
+      )
+    }
     
     return (
       <div className="space-y-1">
