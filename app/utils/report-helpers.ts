@@ -6,63 +6,86 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
   const prEvents = events.filter(e => e.type === "PullRequestEvent")
   const issueEvents = events.filter(e => e.type === "IssuesEvent")
 
+  // Helper function to remove duplicates from items
+  const removeDuplicates = (items: { title: string; url: string }[]) => {
+    const seen = new Set<string>()
+    return items.filter(item => {
+      const key = `${item.title}|${item.url}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
   const prSections = [
     {
       title: "Opened",
-      items: prEvents
-        .filter(e => e.payload.action === "opened")
-        .map(e => ({
-          title: e.payload.pull_request?.title || "",
-          url: e.payload.pull_request?.html_url || ""
-        }))
+      items: removeDuplicates(
+        prEvents
+          .filter(e => e.payload.action === "opened")
+          .map(e => ({
+            title: e.payload.pull_request?.title || "",
+            url: e.payload.pull_request?.html_url || ""
+          }))
+      )
     },
     {
       title: "Reviewed",
-      items: events
-        .filter(e => e.type === "PullRequestReviewEvent")
-        .map(e => ({
-          title: e.payload.pull_request?.title || "",
-          url: e.payload.pull_request?.html_url || ""
-        }))
+      items: removeDuplicates(
+        events
+          .filter(e => e.type === "PullRequestReviewEvent")
+          .map(e => ({
+            title: e.payload.pull_request?.title || "",
+            url: e.payload.pull_request?.html_url || ""
+          }))
+      )
     },
     {
       title: "Closed",
-      items: prEvents
-        .filter(e => e.payload.action === "closed")
-        .map(e => ({
-          title: e.payload.pull_request?.title || "",
-          url: e.payload.pull_request?.html_url || ""
-        }))
+      items: removeDuplicates(
+        prEvents
+          .filter(e => e.payload.action === "closed")
+          .map(e => ({
+            title: e.payload.pull_request?.title || "",
+            url: e.payload.pull_request?.html_url || ""
+          }))
+      )
     }
   ].filter(section => section.items.length > 0)
 
   const issueSections = [
     {
       title: "Opened",
-      items: issueEvents
-        .filter(e => e.payload.action === "opened")
-        .map(e => ({
-          title: e.payload.issue?.title || "",
-          url: e.payload.issue?.html_url || ""
-        }))
+      items: removeDuplicates(
+        issueEvents
+          .filter(e => e.payload.action === "opened")
+          .map(e => ({
+            title: e.payload.issue?.title || "",
+            url: e.payload.issue?.html_url || ""
+          }))
+      )
     },
     {
       title: "Commented",
-      items: events
-        .filter(e => e.type === "IssueCommentEvent")
-        .map(e => ({
-          title: e.payload.issue?.title || "",
-          url: e.payload.comment?.html_url || ""
-        }))
+      items: removeDuplicates(
+        events
+          .filter(e => e.type === "IssueCommentEvent")
+          .map(e => ({
+            title: e.payload.issue?.title || "",
+            url: e.payload.comment?.html_url || ""
+          }))
+      )
     },
     {
       title: "Closed",
-      items: issueEvents
-        .filter(e => e.payload.action === "closed")
-        .map(e => ({
-          title: e.payload.issue?.title || "",
-          url: e.payload.issue?.html_url || ""
-        }))
+      items: removeDuplicates(
+        issueEvents
+          .filter(e => e.payload.action === "closed")
+          .map(e => ({
+            title: e.payload.issue?.title || "",
+            url: e.payload.issue?.html_url || ""
+          }))
+      )
     }
   ].filter(section => section.items.length > 0)
 
