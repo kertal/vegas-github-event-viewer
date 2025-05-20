@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, Suspense } from "react"
 import { Moon, Sun, RefreshCw, ClipboardCopy, ChevronDown, ChevronUp } from "lucide-react"
 import { format, subDays } from "date-fns"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -190,7 +190,8 @@ const parseUsernames = (input: string): string[] => {
     .slice(0, 10)
 }
 
-export default function GitHubEventViewer() {
+// Create a client component wrapper
+function GitHubEventViewerClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
   
@@ -1275,5 +1276,20 @@ export default function GitHubEventViewer() {
         </div>
       )}
     </div>
+  )
+}
+
+// Create the main page component
+export default function GitHubEventViewer() {
+  return (
+    <Suspense fallback={
+      <div className="container mx-auto px-4 py-8 max-w-5xl">
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    }>
+      <GitHubEventViewerClient />
+    </Suspense>
   )
 }
