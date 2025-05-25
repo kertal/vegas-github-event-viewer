@@ -199,8 +199,16 @@ function GitHubEventViewerClient() {
   const [events, setEvents] = useState<GitHubEvent[]>([])
   const [usernames, setUsernames] = useState<string[]>([])
   const [usernameInput, setUsernameInput] = useState("")
-  const [startDate, setStartDate] = useState<Date>(subDays(new Date(), 4))
-  const [endDate, setEndDate] = useState<Date>(new Date())
+  const [startDate, setStartDate] = useState<Date>(() => {
+    const date = subDays(new Date(), 4)
+    date.setHours(0, 0, 0, 0)
+    return date
+  })
+  const [endDate, setEndDate] = useState<Date>(() => {
+    const date = new Date()
+    date.setHours(23, 59, 59, 999)
+    return date
+  })
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
@@ -405,6 +413,7 @@ function GitHubEventViewerClient() {
   // Set date range presets
   const setDateRange = (preset: "today" | "week" | "month" | "threeDays") => {
     const end = new Date()
+    end.setHours(23, 59, 59, 999)
     let start: Date
 
     switch (preset) {
@@ -414,15 +423,19 @@ function GitHubEventViewerClient() {
         break
       case "week":
         start = subDays(new Date(), 7)
+        start.setHours(0, 0, 0, 0)
         break
       case "month":
         start = subDays(new Date(), 30)
+        start.setHours(0, 0, 0, 0)
         break
       case "threeDays":
         start = subDays(new Date(), 3)
+        start.setHours(0, 0, 0, 0)
         break
       default:
         start = subDays(new Date(), 4)
+        start.setHours(0, 0, 0, 0)
     }
 
     setStartDate(start)
@@ -824,7 +837,13 @@ function GitHubEventViewerClient() {
                         <Calendar
                           mode="single"
                           selected={startDate}
-                          onSelect={(date) => date && setStartDate(date)}
+                          onSelect={(date) => {
+                            if (date) {
+                              const newDate = new Date(date)
+                              newDate.setHours(0, 0, 0, 0)
+                              setStartDate(newDate)
+                            }
+                          }}
                           initialFocus
                         />
                       </PopoverContent>
@@ -840,7 +859,13 @@ function GitHubEventViewerClient() {
                         <Calendar
                           mode="single"
                           selected={endDate}
-                          onSelect={(date) => date && setEndDate(date)}
+                          onSelect={(date) => {
+                            if (date) {
+                              const newDate = new Date(date)
+                              newDate.setHours(23, 59, 59, 999)
+                              setEndDate(newDate)
+                            }
+                          }}
                           initialFocus
                         />
                       </PopoverContent>
@@ -893,6 +918,12 @@ function GitHubEventViewerClient() {
 
       {events.length > 0 && (
         <>
+          <div className="flex justify-between items-center mb-4">
+            <div className="text-sm text-muted-foreground">
+              Time Range: {format(startDate, "MMM d, yyyy")} 00:00 - {format(endDate, "MMM d, yyyy")} 23:59
+            </div>
+          </div>
+
           <Card className="mb-6">
             <CardContent className="pt-4">
               <div className="space-y-2">
@@ -1215,9 +1246,6 @@ function GitHubEventViewerClient() {
 
                   return (
                     <>
-                      <div className="text-sm text-muted-foreground mb-4">
-                        Time Range: {format(startDate, "MMM d, yyyy HH:mm")} - {format(endDate, "MMM d, yyyy HH:mm")}
-                      </div>
                       {actors.size > 1 && (
                         <>
                           <h2 className="text-sm font-semibold text-muted-foreground mt-6 mb-2">Involved People</h2>
