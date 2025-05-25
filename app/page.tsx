@@ -1079,6 +1079,15 @@ function GitHubEventViewerClient() {
                       .map(([number, group]) => {
                         const groupKey = `${category}-${number}`
                         const isExpanded = (category === "Other") || expandedGroups.has(groupKey)
+                        
+                        // Get unique actors for this group
+                        const actors = new Map<string, string>()
+                        group.events.forEach(event => {
+                          if (!actors.has(event.actor.login)) {
+                            actors.set(event.actor.login, event.actor.avatar_url)
+                          }
+                        })
+
                         return (
                           <div key={number} className="space-y-1">
                             {number !== 'other' && category !== "Other" && (
@@ -1111,6 +1120,22 @@ function GitHubEventViewerClient() {
                                 >
                                   {truncateMiddle(group.title)}
                                 </a>
+                                <div className="flex -space-x-1 ml-auto">
+                                  {Array.from(actors.entries()).map(([login, avatarUrl]) => (
+                                    <img
+                                      key={login}
+                                      src={avatarUrl}
+                                      alt={login}
+                                      title={login}
+                                      className="w-5 h-5 rounded-full border-2 border-background"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        window.open(`https://github.com/${login}`, '_blank')
+                                      }}
+                                      style={{ cursor: 'pointer' }}
+                                    />
+                                  ))}
+                                </div>
                               </div>
                             )}
                             {isExpanded && group.events.map((event) => {
