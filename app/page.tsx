@@ -212,6 +212,7 @@ function GitHubEventViewerClient() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<ViewMode>("grouped")
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
   const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
@@ -1012,7 +1013,7 @@ function GitHubEventViewerClient() {
           </Card>
 
           <div className="flex justify-between items-center mb-2">
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-input bg-background">
                 <Button
                   variant={viewMode === "grouped" ? "default" : "ghost"}
@@ -1039,6 +1040,25 @@ function GitHubEventViewerClient() {
                   Report
                 </Button>
               </div>
+              {viewMode === "grouped" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const allGroups = Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events)))
+                      .flatMap(([category, numberGroups]) => 
+                        Object.keys(numberGroups).map(number => `${category}-${number}`)
+                      )
+                    if (expandedGroups.size === allGroups.length) {
+                      setExpandedGroups(new Set())
+                    } else {
+                      setExpandedGroups(new Set(allGroups))
+                    }
+                  }}
+                >
+                  {expandedGroups.size > 0 ? "Collapse All" : "Expand All"}
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1056,99 +1076,123 @@ function GitHubEventViewerClient() {
                     </h2>
                     {Object.entries(numberGroups)
                       .filter(([_, group]) => group.events.length > 0)
-                      .map(([number, group]) => (
-                        <div key={number} className="space-y-1">
-                          {number !== 'other' && (
-                            <div className="pl-2">
-                              <a
-                                href={group.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs font-medium text-muted-foreground hover:underline"
-                              >
-                                {truncateMiddle(group.title)}
-                              </a>
-                            </div>
-                          )}
-                          {group.events.map((event) => {
-                            const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
-                            const eventInfo = getEventSummary(event, relatedEvents)
-                            return (
-                              <Card
-                                key={event.id}
-                                className={cn(
-                                  "overflow-hidden transition-all",
-                                  relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
-                                )}
-                              >
-                                <CardContent className="p-0">
-                                  <div
-                                    className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                                    onClick={() => toggleEventExpansion(event.id)}
-                                  >
-                                    <div className="text-lg mt-1" aria-hidden="true">
-                                      {getEventEmoji(event.type)}
-                                    </div>
-                                    <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
-                                      {format(new Date(event.created_at), "EEE, MMM d, HH:mm")}
-                                    </span>
-                                    <img
-                                      src={event.actor.avatar_url}
-                                      alt={`${event.actor.login}'s avatar`}
-                                      className="w-5 h-5 rounded-full mt-1"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        window.open(event.actor.url, '_blank')
-                                      }}
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex justify-between items-start gap-2">
-                                        <a
-                                          href={getEventUrl(event)}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-sm font-medium hover:underline truncate"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          {truncateMiddle(eventInfo.summary)}
-                                        </a>
-                                      </div>
-                                      {eventInfo.title && number === 'other' && (
-                                        <div className="text-xs text-muted-foreground truncate mt-0.5">
-                                          {truncateMiddle(eventInfo.title)}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="ml-auto h-6 w-6 p-0"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        toggleEventExpansion(event.id)
-                                      }}
-                                    >
-                                      {expandedEvents.has(event.id) ? (
-                                        <ChevronUp className="h-3 w-3" />
-                                      ) : (
-                                        <ChevronDown className="h-3 w-3" />
-                                      )}
-                                    </Button>
-                                  </div>
-
-                                  {expandedEvents.has(event.id) && (
-                                    <div className="px-3 pb-2 pt-0">
-                                      <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
-                                        <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
-                                      </div>
-                                    </div>
+                      .map(([number, group]) => {
+                        const groupKey = `${category}-${number}`
+                        const isExpanded = (category === "Other") || expandedGroups.has(groupKey)
+                        return (
+                          <div key={number} className="space-y-1">
+                            {number !== 'other' && category !== "Other" && (
+                              <div className="pl-2 flex items-center gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => {
+                                    const newExpanded = new Set(expandedGroups)
+                                    if (isExpanded) {
+                                      newExpanded.delete(groupKey)
+                                    } else {
+                                      newExpanded.add(groupKey)
+                                    }
+                                    setExpandedGroups(newExpanded)
+                                  }}
+                                >
+                                  {isExpanded ? (
+                                    <ChevronUp className="h-3 w-3" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3" />
                                   )}
-                                </CardContent>
-                              </Card>
-                            )
-                          })}
-                        </div>
-                      ))}
+                                </Button>
+                                <a
+                                  href={group.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-medium text-muted-foreground hover:underline"
+                                >
+                                  {truncateMiddle(group.title)}
+                                </a>
+                              </div>
+                            )}
+                            {isExpanded && group.events.map((event) => {
+                              const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
+                              const eventInfo = getEventSummary(event, relatedEvents)
+                              return (
+                                <Card
+                                  key={event.id}
+                                  className={cn(
+                                    "overflow-hidden transition-all",
+                                    relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
+                                  )}
+                                >
+                                  <CardContent className="p-0">
+                                    <div
+                                      className="flex items-start py-2 px-3 cursor-pointer gap-2"
+                                      onClick={() => toggleEventExpansion(event.id)}
+                                    >
+                                      <div className="text-lg mt-1" aria-hidden="true">
+                                        {getEventEmoji(event.type)}
+                                      </div>
+                                      <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
+                                        {format(new Date(event.created_at), "EEE, MMM d, HH:mm")}
+                                      </span>
+                                      <img
+                                        src={event.actor.avatar_url}
+                                        alt={`${event.actor.login}'s avatar`}
+                                        className="w-5 h-5 rounded-full mt-1"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          window.open(event.actor.url, '_blank')
+                                        }}
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex justify-between items-start gap-2">
+                                          <a
+                                            href={getEventUrl(event)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-sm font-medium hover:underline truncate"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            {truncateMiddle(eventInfo.summary)}
+                                          </a>
+                                        </div>
+                                        {eventInfo.title && number === 'other' && (
+                                          <div className="text-xs text-muted-foreground truncate mt-0.5">
+                                            {truncateMiddle(eventInfo.title)}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="ml-auto h-6 w-6 p-0"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          toggleEventExpansion(event.id)
+                                        }}
+                                      >
+                                        {expandedEvents.has(event.id) ? (
+                                          <ChevronUp className="h-3 w-3" />
+                                        ) : (
+                                          <ChevronDown className="h-3 w-3" />
+                                        )}
+                                      </Button>
+                                    </div>
+
+                                    {expandedEvents.has(event.id) && (
+                                      <div className="px-3 pb-2 pt-0">
+                                        <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
+                                          <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
                   </div>
                 ))
             ) : viewMode === "timeline" ? (
