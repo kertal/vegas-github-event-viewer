@@ -220,6 +220,7 @@ function GitHubEventViewerClient() {
   const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set())
   const [lastRequestKey, setLastRequestKey] = useState<string>("")
+  const [quickSelectOpen, setQuickSelectOpen] = useState(false)
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -413,37 +414,98 @@ function GitHubEventViewerClient() {
 
   // Set date range presets
   const setDateRange = (preset: "today" | "week" | "month" | "threeDays") => {
-    const end = new Date()
-    end.setHours(23, 59, 59, 999)
     let start: Date
+    let end: Date
 
     switch (preset) {
       case "today":
         start = new Date()
         start.setHours(0, 0, 0, 0)
+        end = new Date()
+        end.setHours(23, 59, 59, 999)
         break
-      case "week":
-        start = subDays(new Date(), 7)
+      case "week": {
+        // Get current date
+        const now = new Date()
+        // Get the day of the week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+        const currentDay = now.getDay()
+        // Calculate days to subtract to get to Monday (if Sunday, subtract 6 days)
+        const daysToMonday = currentDay === 0 ? 6 : currentDay - 1
+        
+        // Set start to Monday
+        start = new Date()
+        start.setDate(now.getDate() - daysToMonday)
         start.setHours(0, 0, 0, 0)
+        
+        // Set end to Sunday
+        end = new Date(start)
+        end.setDate(start.getDate() + 6)
+        end.setHours(23, 59, 59, 999)
         break
-      case "month":
-        start = subDays(new Date(), 30)
+      }
+      case "month": {
+        // Get current date
+        const now = new Date()
+        
+        // Set start to first day of current month
+        start = new Date(now.getFullYear(), now.getMonth(), 1)
         start.setHours(0, 0, 0, 0)
+        
+        // Set end to last day of current month
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+        end.setHours(23, 59, 59, 999)
         break
+      }
       case "threeDays":
         start = subDays(new Date(), 3)
         start.setHours(0, 0, 0, 0)
+        end = new Date()
+        end.setHours(23, 59, 59, 999)
         break
       default:
         start = subDays(new Date(), 4)
         start.setHours(0, 0, 0, 0)
+        end = new Date()
+        end.setHours(23, 59, 59, 999)
     }
 
     setStartDate(start)
     setEndDate(end)
+    setQuickSelectOpen(false)
     // Automatically submit the form after setting the date range
     if (usernames.length > 0) {
       fetchEvents()
+    }
+  }
+
+  // Helper function to validate and set dates
+  const validateAndSetDates = (newStartDate: Date | null, newEndDate: Date | null) => {
+    if (!newStartDate || !newEndDate) return
+
+    // Ensure we're working with copies
+    const start = new Date(newStartDate)
+    const end = new Date(newEndDate)
+
+    // If start date is after end date, adjust the other date
+    if (start > end) {
+      if (start === newStartDate) {
+        // If setting start date, move end date forward
+        end.setTime(start.getTime())
+        end.setHours(23, 59, 59, 999)
+        setEndDate(end)
+      } else {
+        // If setting end date, move start date backward
+        start.setTime(end.getTime())
+        start.setHours(0, 0, 0, 0)
+        setStartDate(start)
+      }
+    }
+
+    // Set the date that was actually changed
+    if (start === newStartDate) {
+      setStartDate(start)
+    } else {
+      setEndDate(end)
     }
   }
 
@@ -816,6 +878,48 @@ function GitHubEventViewerClient() {
     )
   }
 
+  // Add helper function to calculate date range duration
+  const getDateRangeDuration = () => {
+    return Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
+  }
+
+  // Add function to navigate periods
+  const navigatePeriod = (direction: 'next' | 'previous') => {
+    const durationDays = getDateRangeDuration()
+    const newStartDate = new Date()
+    const newEndDate = new Date()
+
+    if (direction === 'next') {
+      // Start from the day after current end date
+      newStartDate.setTime(endDate.getTime())
+      newStartDate.setDate(endDate.getDate() + 1)
+      newStartDate.setHours(0, 0, 0, 0)
+      
+      // End date is start date plus duration minus 1 (since start date counts as day 1)
+      newEndDate.setTime(newStartDate.getTime())
+      newEndDate.setDate(newStartDate.getDate() + durationDays - 1)
+      newEndDate.setHours(23, 59, 59, 999)
+    } else {
+      // End date is the day before current start date
+      newEndDate.setTime(startDate.getTime())
+      newEndDate.setDate(startDate.getDate() - 1)
+      newEndDate.setHours(23, 59, 59, 999)
+      
+      // Start date is end date minus duration plus 1 (since end date counts as day 1)
+      newStartDate.setTime(newEndDate.getTime())
+      newStartDate.setDate(newEndDate.getDate() - durationDays + 1)
+      newStartDate.setHours(0, 0, 0, 0)
+    }
+
+    setStartDate(newStartDate)
+    setEndDate(newEndDate)
+    setQuickSelectOpen(false)
+
+    if (usernames.length > 0) {
+      fetchEvents()
+    }
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
       <header className="flex justify-between items-center mb-6">
@@ -875,7 +979,7 @@ function GitHubEventViewerClient() {
                             if (date) {
                               const newDate = new Date(date)
                               newDate.setHours(0, 0, 0, 0)
-                              setStartDate(newDate)
+                              validateAndSetDates(newDate, endDate)
                             }
                           }}
                           initialFocus
@@ -897,39 +1001,85 @@ function GitHubEventViewerClient() {
                             if (date) {
                               const newDate = new Date(date)
                               newDate.setHours(23, 59, 59, 999)
-                              setEndDate(newDate)
+                              validateAndSetDates(startDate, newDate)
                             }
                           }}
                           initialFocus
                         />
                       </PopoverContent>
                     </Popover>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowQuickDateOptions(!showQuickDateOptions)}
-                      className="px-2"
-                    >
-                      {showQuickDateOptions ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    </Button>
+                    <Popover open={quickSelectOpen} onOpenChange={setQuickSelectOpen}>
+                      <PopoverTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-10 w-10">
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-56 p-2" align="end">
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 flex-1"
+                              onClick={() => navigatePeriod('previous')}
+                            >
+                              Previous
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 flex-1"
+                              onClick={() => navigatePeriod('next')}
+                            >
+                              Next
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-full"
+                              onClick={() => {
+                                setDateRange("today")
+                              }}
+                            >
+                              Today
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-full"
+                              onClick={() => {
+                                setDateRange("threeDays")
+                              }}
+                            >
+                              3 Days
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-full"
+                              onClick={() => {
+                                setDateRange("week")
+                              }}
+                            >
+                              This Week
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-full"
+                              onClick={() => {
+                                setDateRange("month")
+                              }}
+                            >
+                              This Month
+                            </Button>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
-                  {showQuickDateOptions && (
-                    <div className="flex gap-2">
-                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("today")}>
-                        Today
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("threeDays")}>
-                        3 Days
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("week")}>
-                        This Week
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setDateRange("month")}>
-                        This Month
-                      </Button>
-                    </div>
-                  )}
                 </div>
               </div>
 
