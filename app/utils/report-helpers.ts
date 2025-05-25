@@ -24,6 +24,26 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
     })
   }
 
+  // Track all issues across sections to prevent duplicates
+  const seenIssues = new Set<string>()
+
+  // Helper function to add unique issues to a section
+  const addUniqueIssues = (events: GitHubEvent[], action: string, urlKey: 'html_url' | 'comment_url' = 'html_url') => {
+    const items = events
+      .filter(e => {
+        const issueKey = `${e.repo.name}#${e.payload.issue?.number}`
+        if (e.payload.action !== action || seenIssues.has(issueKey)) return false
+        seenIssues.add(issueKey)
+        return true
+      })
+      .map(e => ({
+        title: truncateMiddle(e.payload.issue?.title || ""),
+        url: e.payload[urlKey === 'comment_url' ? 'comment' : 'issue']?.html_url || ""
+      }))
+    
+    return removeDuplicates(items)
+  }
+
   const prSections = [
     {
       title: "Opened",
@@ -48,10 +68,21 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
       )
     },
     {
+      title: "Merged",
+      items: removeDuplicates(
+        prEvents
+          .filter(e => e.payload.action === "closed" && e.payload.pull_request?.merged === true)
+          .map(e => ({
+            title: truncateMiddle(e.payload.pull_request?.title || ""),
+            url: e.payload.pull_request?.html_url || ""
+          }))
+      )
+    },
+    {
       title: "Closed",
       items: removeDuplicates(
         prEvents
-          .filter(e => e.payload.action === "closed")
+          .filter(e => e.payload.action === "closed" && e.payload.pull_request?.merged !== true)
           .map(e => ({
             title: truncateMiddle(e.payload.pull_request?.title || ""),
             url: e.payload.pull_request?.html_url || ""
@@ -63,36 +94,19 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
   const issueSections = [
     {
       title: "Opened",
-      items: removeDuplicates(
-        issueEvents
-          .filter(e => e.payload.action === "opened")
-          .map(e => ({
-            title: truncateMiddle(e.payload.issue?.title || ""),
-            url: e.payload.issue?.html_url || ""
-          }))
-      )
+      items: addUniqueIssues(issueEvents, "opened")
     },
     {
       title: "Commented",
-      items: removeDuplicates(
-        events
-          .filter(e => e.type === "IssueCommentEvent")
-          .map(e => ({
-            title: truncateMiddle(e.payload.issue?.title || ""),
-            url: e.payload.comment?.html_url || ""
-          }))
+      items: addUniqueIssues(
+        events.filter(e => e.type === "IssueCommentEvent"),
+        "created",
+        'comment_url'
       )
     },
     {
       title: "Closed",
-      items: removeDuplicates(
-        issueEvents
-          .filter(e => e.payload.action === "closed")
-          .map(e => ({
-            title: truncateMiddle(e.payload.issue?.title || ""),
-            url: e.payload.issue?.html_url || ""
-          }))
-      )
+      items: addUniqueIssues(issueEvents, "closed")
     }
   ].filter(section => section.items.length > 0)
 
@@ -127,7 +141,8 @@ export const formatReportForSlack = (reportData: ReportItem[]): string => {
             if (item.title === 'Pull Requests') {
               if (section.title === 'Opened') emoji = '🔀'
               else if (section.title === 'Reviewed') emoji = '👀'
-              else if (section.title === 'Closed') emoji = '✅'
+              else if (section.title === 'Merged') emoji = '🎉'
+              else if (section.title === 'Closed') emoji = '❌'
             } else if (item.title === 'Issues') {
               if (section.title === 'Opened') emoji = '❓'
               else if (section.title === 'Commented') emoji = '💬'
