@@ -110,7 +110,11 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
     {
       title: "Commented",
       items: addUniqueIssues(
-        events.filter(e => e.type === "IssueCommentEvent"),
+        events.filter(e => 
+          e.type === "IssueCommentEvent" && 
+          // Only include comments on issues (not PRs)
+          !e.payload.issue?.pull_request
+        ),
         "created",
         'comment_url'
       )
