@@ -746,6 +746,20 @@ function GitHubEventViewerClient() {
     const eventsToExport = getFilteredEvents(events)
     const reportData = prepareReportData(eventsToExport)
     
+    // Helper function to get actors for a specific item
+    const getItemActors = (url: string) => {
+      return new Map(
+        eventsToExport
+          .filter(e => {
+            const eventUrl = e.payload.pull_request?.html_url || 
+                           e.payload.issue?.html_url || 
+                           e.payload.comment?.html_url
+            return eventUrl === url
+          })
+          .map(e => [e.actor.login, e.actor.avatar_url])
+      )
+    }
+    
     if (reportData.length === 0) {
       return (
         <div className="text-center py-4 text-muted-foreground">
@@ -765,13 +779,32 @@ function GitHubEventViewerClient() {
                   <li key={sectionIndex} className="mb-2">
                     <div className="font-medium text-base mb-1">{section.title}</div>
                     <ul className="pl-4 space-y-1 list-disc">
-                      {section.items.map((listItem, listIndex) => (
-                        <li key={listIndex} className="text-sm">
-                          <a href={listItem.url} target="_blank" rel="noopener noreferrer">
-                            {listItem.title}
-                          </a>
-                        </li>
-                      ))}
+                      {section.items.map((listItem, listIndex) => {
+                        const actors = getItemActors(listItem.url)
+                        return (
+                          <li key={listIndex} className="text-sm flex items-center gap-2">
+                            <a href={listItem.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                              {listItem.title}
+                            </a>
+                            <div className="flex -space-x-1">
+                              {Array.from(actors.entries()).map(([login, avatarUrl]) => (
+                                <img
+                                  key={login}
+                                  src={avatarUrl}
+                                  alt={login}
+                                  title={login}
+                                  className="w-5 h-5 rounded-full border-2 border-background"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    window.open(`https://github.com/${login}`, '_blank')
+                                  }}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                              ))}
+                            </div>
+                          </li>
+                        )
+                      })}
                     </ul>
                   </li>
                 ))}
