@@ -71,7 +71,13 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
       title: "Merged",
       items: removeDuplicates(
         prEvents
-          .filter(e => e.payload.action === "closed" && e.payload.pull_request?.merged === true)
+          .filter(e => {
+            // Only show merged PRs where the person who merged it is also the creator
+            const pr = e.payload.pull_request
+            return e.payload.action === "closed" && 
+                   pr?.merged === true && 
+                   pr?.user?.login === e.actor.login
+          })
           .map(e => ({
             title: truncateMiddle(e.payload.pull_request?.title || ""),
             url: e.payload.pull_request?.html_url || ""
@@ -82,7 +88,12 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
       title: "Closed",
       items: removeDuplicates(
         prEvents
-          .filter(e => e.payload.action === "closed" && e.payload.pull_request?.merged !== true)
+          .filter(e => {
+            const pr = e.payload.pull_request
+            return e.payload.action === "closed" && 
+                   (pr?.merged !== true || // Not merged
+                    (pr?.merged === true && pr?.user?.login !== e.actor.login)) // Or merged by someone else
+          })
           .map(e => ({
             title: truncateMiddle(e.payload.pull_request?.title || ""),
             url: e.payload.pull_request?.html_url || ""
