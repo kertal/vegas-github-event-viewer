@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState, Suspense } from "react"
-import { Moon, Sun, RefreshCw, ClipboardCopy, ChevronDown, ChevronUp } from "lucide-react"
+import { Moon, Sun, RefreshCw, ClipboardCopy, ChevronDown, ChevronUp, ChevronRight } from "lucide-react"
 import { format, subDays } from "date-fns"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -221,6 +221,7 @@ function GitHubEventViewerClient() {
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set())
   const [lastRequestKey, setLastRequestKey] = useState<string>("")
   const [quickSelectOpen, setQuickSelectOpen] = useState(false)
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -343,6 +344,37 @@ function GitHubEventViewerClient() {
     }
     localStorage.setItem("github-event-viewer-prefs", JSON.stringify(prefs))
   }, [usernames, startDate, endDate, expandedEvents, theme, viewMode, selectedRepos, selectedEventTypes, selectedLabels, showFilters])
+
+  // Load collapsed sections state from localStorage
+  useEffect(() => {
+    const savedCollapsedSections = localStorage.getItem("github-event-collapsed-sections")
+    if (savedCollapsedSections) {
+      try {
+        setCollapsedSections(new Set(JSON.parse(savedCollapsedSections)))
+      } catch (error) {
+        console.error("Error parsing saved collapsed sections:", error)
+      }
+    }
+  }, [])
+
+  // Save collapsed sections state to localStorage
+  useEffect(() => {
+    localStorage.setItem(
+      "github-event-collapsed-sections",
+      JSON.stringify(Array.from(collapsedSections))
+    )
+  }, [collapsedSections])
+
+  // Toggle section collapse
+  const toggleSection = (sectionKey: string) => {
+    const newCollapsed = new Set(collapsedSections)
+    if (newCollapsed.has(sectionKey)) {
+      newCollapsed.delete(sectionKey)
+    } else {
+      newCollapsed.add(sectionKey)
+    }
+    setCollapsedSections(newCollapsed)
+  }
 
   // Toggle raw JSON view for an event
   const toggleEventExpansion = (eventId: string) => {
@@ -746,17 +778,23 @@ function GitHubEventViewerClient() {
     }
   }
 
-  // Update the copy report functionality to use rich text
+  // Update the copy report functionality to exclude collapsed sections
   const copyReport = async () => {
     const eventsToExport = getFilteredEvents(events)
     const reportData = prepareReportData(eventsToExport)
     
+    // Filter out collapsed sections
+    const visibleReportData = reportData.map(item => ({
+      ...item,
+      sections: item.sections.filter(section => !collapsedSections.has(`${item.title}-${section.title}`))
+    })).filter(item => item.sections.length > 0)
+    
     // Create HTML version of the report
     const htmlContent = `
       <div>
-        <b>GitHub Activity Report</b>
+        <b>GitHub Activity Summary</b>
         <p>${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}</p>
-        ${reportData.map(item => `
+        ${visibleReportData.map(item => `
           <ul>
             <li>${item.title}</li>
             ${item.sections.map(section => `
@@ -764,12 +802,11 @@ function GitHubEventViewerClient() {
                 <li>${section.title}</li>
                 <ul>
                   ${section.items.map(listItem => {
-                    // Determine emoji based on section title and item title
-                    let emoji = '📋' // default emoji
+                    let emoji = '📋'
                     if (item.title === 'Pull Requests') {
                       if (section.title === 'Opened') emoji = '🔀'
                       else if (section.title === 'Reviewed') emoji = '👀'
-                      else if (section.title === 'Closed') emoji = '✅'
+                      else if (section.title === 'Merged') emoji = '✅'
                     } else if (item.title === 'Issues') {
                       if (section.title === 'Opened') emoji = '❓'
                       else if (section.title === 'Commented') emoji = '💬'
@@ -789,22 +826,19 @@ function GitHubEventViewerClient() {
       </div>
     `
 
-    // Create plain text version (Slack format)
-    const plainText = formatReportForSlack(reportData)
+    // Create plain text version
+    const plainText = formatReportForSlack(visibleReportData)
 
     // Create Blob items for each mime type
     const blobHtml = new Blob([htmlContent], { type: 'text/html' })
     const blobPlain = new Blob([plainText], { type: 'text/plain' })
 
-    const clipboardItemInput = {
-      'text/html': blobHtml,
-      'text/plain': blobPlain
-    }
-
     try {
-      // Write to clipboard
       await navigator.clipboard.write([
-        new ClipboardItem(clipboardItemInput)
+        new ClipboardItem({
+          'text/html': blobHtml,
+          'text/plain': blobPlain
+        })
       ])
       
       toast({
@@ -821,7 +855,7 @@ function GitHubEventViewerClient() {
     }
   }
 
-  // Update the renderReport function to use the new data structure
+  // Update the renderReport function to include collapse controls
   const renderReport = () => {
     const eventsToExport = getFilteredEvents(events)
     const reportData = prepareReportData(eventsToExport)
@@ -850,48 +884,65 @@ function GitHubEventViewerClient() {
     
     return (
       <div className="space-y-1">
-        <ul className="pl-0">
+        <div className="space-y-4">
           {reportData.map((item, index) => (
-            <li key={index} className="mb-4">
+            <div key={index}>
               <div className="font-semibold text-lg mb-2">{item.title}</div>
-              <ul className="pl-4 space-y-2 list-disc">
-                {item.sections.map((section, sectionIndex) => (
-                  <li key={sectionIndex} className="mb-2">
-                    <div className="font-medium text-base mb-1">{section.title}</div>
-                    <ul className="pl-4 space-y-1 list-disc">
-                      {section.items.map((listItem, listIndex) => {
-                        const actors = getItemActors(listItem.url)
-                        return (
-                          <li key={listIndex} className="text-sm flex items-center gap-2">
-                            <a href={listItem.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                              {listItem.title}
-                            </a>
-                            <div className="flex -space-x-1">
-                              {Array.from(actors.entries()).map(([login, avatarUrl]) => (
-                                <img
-                                  key={login}
-                                  src={avatarUrl}
-                                  alt={login}
-                                  title={login}
-                                  className="w-5 h-5 rounded-full border-2 border-background"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    window.open(`https://github.com/${login}`, '_blank')
-                                  }}
-                                  style={{ cursor: 'pointer' }}
-                                />
-                              ))}
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-            </li>
+              <div className="pl-4 space-y-2">
+                {item.sections.map((section, sectionIndex) => {
+                  const sectionKey = `${item.title}-${section.title}`
+                  const isCollapsed = collapsedSections.has(sectionKey)
+                  
+                  return (
+                    <div key={sectionIndex} className="mb-2">
+                      <div 
+                        className="font-medium text-base mb-1 flex items-center gap-2 cursor-pointer hover:text-primary"
+                        onClick={() => toggleSection(sectionKey)}
+                      >
+                        {isCollapsed ? (
+                          <ChevronRight className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                        <span>{section.title} ({section.items.length})</span>
+                      </div>
+                      {!isCollapsed && (
+                        <div className="pl-4 space-y-1">
+                          {section.items.map((listItem, listIndex) => {
+                            const actors = getItemActors(listItem.url)
+                            return (
+                              <div key={listIndex} className="text-sm flex items-center gap-2">
+                                <a href={listItem.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                  {listItem.title}
+                                </a>
+                                <div className="flex -space-x-1">
+                                  {Array.from(actors.entries()).map(([login, avatarUrl]) => (
+                                    <img
+                                      key={login}
+                                      src={avatarUrl}
+                                      alt={login}
+                                      title={login}
+                                      className="w-5 h-5 rounded-full border-2 border-background"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        window.open(`https://github.com/${login}`, '_blank')
+                                      }}
+                                      style={{ cursor: 'pointer' }}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           ))}
-        </ul>
+        </div>
       </div>
     )
   }
@@ -1417,7 +1468,7 @@ function GitHubEventViewerClient() {
                                           toggleEventExpansion(event.id)
                                         }}
                                       >
-                                        {expandedEvents.has(event.id) ? (
+                                        {expandedGroups.has(event.id) ? (
                                           <ChevronUp className="h-3 w-3" />
                                         ) : (
                                           <ChevronDown className="h-3 w-3" />
@@ -1425,7 +1476,7 @@ function GitHubEventViewerClient() {
                                       </Button>
                                     </div>
 
-                                    {expandedEvents.has(event.id) && (
+                                    {expandedGroups.has(event.id) && (
                                       <div className="px-3 pb-2 pt-0">
                                         <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
                                           <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
@@ -1501,7 +1552,7 @@ function GitHubEventViewerClient() {
                             toggleEventExpansion(event.id)
                           }}
                         >
-                          {expandedEvents.has(event.id) ? (
+                          {expandedGroups.has(event.id) ? (
                             <ChevronUp className="h-3 w-3" />
                           ) : (
                             <ChevronDown className="h-3 w-3" />
@@ -1509,7 +1560,7 @@ function GitHubEventViewerClient() {
                         </Button>
                       </div>
 
-                      {expandedEvents.has(event.id) && (
+                      {expandedGroups.has(event.id) && (
                         <div className="px-3 pb-2 pt-0">
                           <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
                             <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
