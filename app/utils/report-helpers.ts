@@ -1,174 +1,179 @@
-import { GitHubEvent, ReportItem } from '../types/github'
-import { getEventEmoji } from './event-helpers'
+import { GitHubEvent } from "@/types/github"
 
-// Add truncateMiddle function
-const truncateMiddle = (str: string, maxLength: number = 120): string => {
-  if (str.length <= maxLength) return str
-  const halfLength = Math.floor((maxLength - 3) / 2)
-  return `${str.slice(0, halfLength)}...${str.slice(-halfLength)}`
+interface ReportItem {
+  title: string
+  sections: {
+    title: string
+    items: {
+      title: string
+      url: string
+    }[]
+  }[]
 }
 
-// Add function to prepare report data
 export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
-  const prEvents = events.filter(e => e.type === "PullRequestEvent")
-  const issueEvents = events.filter(e => e.type === "IssuesEvent")
+  const reportData: ReportItem[] = []
 
-  // Helper function to remove duplicates from items
-  const removeDuplicates = (items: { title: string; url: string }[]) => {
-    const seen = new Set<string>()
-    return items.filter(item => {
-      const key = `${item.title}|${item.url}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
+  // Helper function to add an item to a section
+  const addToSection = (
+    categoryTitle: string,
+    sectionTitle: string,
+    itemTitle: string,
+    itemUrl: string
+  ) => {
+    let category = reportData.find(item => item.title === categoryTitle)
+    if (!category) {
+      category = { title: categoryTitle, sections: [] }
+      reportData.push(category)
+    }
+
+    let section = category.sections.find(s => s.title === sectionTitle)
+    if (!section) {
+      section = { title: sectionTitle, items: [] }
+      category.sections.push(section)
+    }
+
+    // Check if this item already exists
+    const existingItem = section.items.find(item => item.url === itemUrl)
+    if (!existingItem) {
+      section.items.push({ title: itemTitle, url: itemUrl })
+    }
   }
 
-  // Track all issues across sections to prevent duplicates
-  const seenIssues = new Set<string>()
+  // Process each event
+  events.forEach(event => {
+    switch (event.type) {
+      case "PullRequestEvent": {
+        const action = event.payload.action
+        const pr = event.payload.pull_request
+        if (!pr) break
 
-  // Helper function to add unique issues to a section
-  const addUniqueIssues = (events: GitHubEvent[], action: string, urlKey: 'html_url' | 'comment_url' = 'html_url') => {
-    const items = events
-      .filter(e => {
-        const issueKey = `${e.repo.name}#${e.payload.issue?.number}`
-        if (e.payload.action !== action || seenIssues.has(issueKey)) return false
-        seenIssues.add(issueKey)
-        return true
-      })
-      .map(e => ({
-        title: truncateMiddle(e.payload.issue?.title || ""),
-        url: e.payload[urlKey === 'comment_url' ? 'comment' : 'issue']?.html_url || ""
-      }))
+        const title = pr.title
+        const url = pr.html_url
+        const isMerged = pr.merged
+        const mergedBy = pr.merged_by?.login
+        const creator = pr.user?.login
+
+        if (action === "opened") {
+          addToSection("Pull Requests", "Opened", title, url)
+        } else if (action === "closed" && isMerged && mergedBy === creator) {
+          addToSection("Pull Requests", "Merged", title, url)
+        } else if (action === "closed" && isMerged) {
+          addToSection("Pull Requests", "Merged", title, url)
+        }
+        break
+      }
+
+      case "PullRequestReviewEvent": {
+        const pr = event.payload.pull_request
+        const review = event.payload.review
+        if (!pr || !review) break
+
+        const title = pr.title
+        const url = pr.html_url
+
+        if (review.state === "approved") {
+          addToSection("Pull Requests", "Reviewed", title, url)
+        }
+        break
+      }
+
+      case "IssuesEvent": {
+        const action = event.payload.action
+        const issue = event.payload.issue
+        if (!issue) break
+
+        const title = issue.title
+        const url = issue.html_url
+
+        if (action === "opened") {
+          addToSection("Issues", "Opened", title, url)
+        } else if (action === "closed") {
+          addToSection("Issues", "Closed", title, url)
+        }
+        break
+      }
+
+      case "IssueCommentEvent": {
+        const issue = event.payload.issue
+        if (!issue || issue.pull_request) break // Skip PR comments
+
+        const title = issue.title
+        const url = issue.html_url
+
+        addToSection("Issues", "Commented", title, url)
+        break
+      }
+
+      case "PushEvent": {
+        const commits = event.payload.commits || []
+        const branch = event.payload.ref?.replace("refs/heads/", "")
+        
+        commits.forEach(commit => {
+          const title = `[${branch}] ${commit.message.split("\n")[0]}`
+          const url = `https://github.com/${event.repo.name}/commit/${commit.sha}`
+          addToSection("Commits", "Pushed", title, url)
+        })
+        break
+      }
+
+      // Add other event types as needed
+      default:
+        // Handle other events if needed
+        break
+    }
+  })
+
+  // Sort sections and items
+  reportData.forEach(category => {
+    // Sort sections by priority
+    const sectionOrder = {
+      "Opened": 1,
+      "Reviewed": 2,
+      "Merged": 3,
+      "Commented": 4,
+      "Closed": 5,
+      "Pushed": 6
+    }
     
-    return removeDuplicates(items)
-  }
-
-  const prSections = [
-    {
-      title: "Opened",
-      items: removeDuplicates(
-        prEvents
-          .filter(e => e.payload.action === "opened")
-          .map(e => ({
-            title: truncateMiddle(e.payload.pull_request?.title || ""),
-            url: e.payload.pull_request?.html_url || ""
-          }))
-      )
-    },
-    {
-      title: "Reviewed",
-      items: removeDuplicates(
-        events
-          .filter(e => e.type === "PullRequestReviewEvent")
-          .map(e => ({
-            title: truncateMiddle(e.payload.pull_request?.title || ""),
-            url: e.payload.pull_request?.html_url || ""
-          }))
-      )
-    },
-    {
-      title: "Merged",
-      items: removeDuplicates(
-        prEvents
-          .filter(e => {
-            // Only show merged PRs where the person who merged it is also the creator
-            const pr = e.payload.pull_request
-            return e.payload.action === "closed" && 
-                   pr?.merged === true && 
-                   pr?.user?.login === e.actor.login
-          })
-          .map(e => ({
-            title: truncateMiddle(e.payload.pull_request?.title || ""),
-            url: e.payload.pull_request?.html_url || ""
-          }))
-      )
-    },
-    {
-      title: "Closed",
-      items: removeDuplicates(
-        prEvents
-          .filter(e => {
-            const pr = e.payload.pull_request
-            return e.payload.action === "closed" && 
-                   (pr?.merged !== true || // Not merged
-                    (pr?.merged === true && pr?.user?.login !== e.actor.login)) // Or merged by someone else
-          })
-          .map(e => ({
-            title: truncateMiddle(e.payload.pull_request?.title || ""),
-            url: e.payload.pull_request?.html_url || ""
-          }))
-      )
-    }
-  ].filter(section => section.items.length > 0)
-
-  const issueSections = [
-    {
-      title: "Opened",
-      items: addUniqueIssues(issueEvents, "opened")
-    },
-    {
-      title: "Commented",
-      items: addUniqueIssues(
-        events.filter(e => 
-          e.type === "IssueCommentEvent" && 
-          // Only include comments on issues (not PRs)
-          !e.payload.issue?.pull_request
-        ),
-        "created",
-        'comment_url'
-      )
-    },
-    {
-      title: "Closed",
-      items: addUniqueIssues(issueEvents, "closed")
-    }
-  ].filter(section => section.items.length > 0)
-
-  const reportItems: ReportItem[] = []
-
-  if (prSections.length > 0) {
-    reportItems.push({
-      title: "Pull Requests",
-      sections: prSections
+    category.sections.sort((a, b) => {
+      const orderA = sectionOrder[a.title as keyof typeof sectionOrder] || 99
+      const orderB = sectionOrder[b.title as keyof typeof sectionOrder] || 99
+      return orderA - orderB
     })
-  }
 
-  if (issueSections.length > 0) {
-    reportItems.push({
-      title: "Issues",
-      sections: issueSections
+    // Sort items by URL (which typically includes numbers)
+    category.sections.forEach(section => {
+      section.items.sort((a, b) => a.url.localeCompare(b.url))
     })
-  }
+  })
 
-  return reportItems
+  // Sort categories by priority
+  const categoryOrder = ["Pull Requests", "Issues", "Commits"]
+  reportData.sort((a, b) => {
+    const orderA = categoryOrder.indexOf(a.title)
+    const orderB = categoryOrder.indexOf(b.title)
+    if (orderA === -1) return 1
+    if (orderB === -1) return -1
+    return orderA - orderB
+  })
+
+  return reportData
 }
 
-// Add function to format report for Slack
 export const formatReportForSlack = (reportData: ReportItem[]): string => {
-  return reportData.map(item => {
-    const sections = item.sections
-      .map(section => {
-        const items = section.items
-          .map(listItem => {
-            // Determine emoji based on section title
-            let emoji = '📋' // default emoji
-            if (item.title === 'Pull Requests') {
-              if (section.title === 'Opened') emoji = '🔀'
-              else if (section.title === 'Reviewed') emoji = '👀'
-              else if (section.title === 'Merged') emoji = '🎉'
-              else if (section.title === 'Closed') emoji = '❌'
-            } else if (item.title === 'Issues') {
-              if (section.title === 'Opened') emoji = '❓'
-              else if (section.title === 'Commented') emoji = '💬'
-              else if (section.title === 'Closed') emoji = '✅'
-            }
-            return `${emoji} <${listItem.url}|${listItem.title}>`
-          })
-          .join('\n')
-        return `*${section.title}*\n${items}`
+  let text = ""
+
+  reportData.forEach(category => {
+    text += `*${category.title}*\n`
+    category.sections.forEach(section => {
+      text += `  ${section.title}\n`
+      section.items.forEach(item => {
+        text += `    • ${item.title}\n      ${item.url}\n`
       })
-      .join('\n\n')
-    return `*${item.title}*\n${sections}`
-  }).join('\n\n')
+    })
+    text += "\n"
+  })
+
+  return text
 } 

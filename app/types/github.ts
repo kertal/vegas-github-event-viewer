@@ -10,14 +10,57 @@ export interface GitHubEvent {
   }
   repo: {
     name: string
-    url: string
   }
-  payload: any
+  payload: {
+    action?: string
+    pull_request?: {
+      number: number
+      title: string
+      html_url: string
+      merged?: boolean
+      merged_by?: {
+        login: string
+      }
+      user?: {
+        login: string
+      }
+      body?: string
+      labels?: Label[]
+    }
+    issue?: {
+      number: number
+      title: string
+      html_url: string
+      pull_request?: {
+        html_url: string
+      }
+      labels?: Label[]
+    }
+    comment?: {
+      html_url: string
+    }
+    commits?: Array<{
+      sha: string
+      message: string
+    }>
+    head?: string
+    ref?: string
+    size?: number
+    head_commit?: {
+      message: string
+    }
+    review?: {
+      state: string
+    }
+    release?: {
+      html_url: string
+    }
+  }
 }
 
 export type EventCategory = "Pull Requests" | "Issues" | "Commits" | "Repository" | "Other"
 
-export type ViewMode = "grouped" | "timeline" | "report"
+export type ViewMode = "timeline" | "grouped" | "report"
 
 export interface RelatedEvents {
   issue?: GitHubEvent
@@ -53,6 +96,17 @@ export interface UserPreferences {
   selectedEventTypes: string[]
   selectedLabels: string[]
   showFilters: boolean
+}
+
+export interface DateRange {
+  startDate: Date
+  endDate: Date
+}
+
+export interface Label {
+  name: string
+  color: string
+  description?: string
 }
 
 // Event type constants

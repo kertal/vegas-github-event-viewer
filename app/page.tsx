@@ -2,21 +2,27 @@
 
 import React, { useEffect, useState, Suspense } from "react"
 import { Moon, Sun, RefreshCw, ClipboardCopy, ChevronDown, ChevronUp, ChevronRight } from "lucide-react"
-import { format, subDays } from "date-fns"
+import { format, subDays, startOfDay, endOfDay, addDays } from "date-fns"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent } from "@/components/ui/card"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { useToast } from "@/hooks/use-toast"
+import { Button } from "../components/ui/button"
+import { Input } from "../components/ui/input"
+import { Card, CardContent } from "../components/ui/card"
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover"
+import { Calendar } from "../components/ui/calendar"
+import { useToast } from "./hooks/use-toast"
 import { useTheme } from "next-themes"
-import { cn } from "@/lib/utils"
+import { cn } from "./lib/utils"
 import { GitHubEvent, EventCategory, ViewMode, UserPreferences } from "./types/github"
 import { getEventCategory, groupEventsByCategoryAndNumber, groupRelatedEventsForTimeline, getEventSummary } from "./utils/event-helpers"
 import { prepareReportData, formatReportForSlack } from "./utils/report-helpers"
-
-
+import { Header } from "./components/GitHubEventViewer/Header"
+import { UserInput } from "./components/GitHubEventViewer/UserInput"
+import { Filters } from "./components/GitHubEventViewer/Filters"
+import { ViewModeSelector } from "./components/GitHubEventViewer/ViewModeSelector"
+import { TimelineView } from "./components/GitHubEventViewer/TimelineView"
+import { GroupedView } from "./components/GitHubEventViewer/GroupedView"
+import { SummaryView } from "./components/GitHubEventViewer/SummaryView"
+import { NoEvents } from "./components/GitHubEventViewer/NoEvents"
 
 // Add event type constants
 const EVENT_TYPES: Record<EventCategory, string[]> = {
@@ -47,7 +53,6 @@ const EVENT_TYPES: Record<EventCategory, string[]> = {
     "SecurityAdvisoryEvent"
   ]
 }
-
 
 // Add interface for related events
 interface RelatedEvents {
@@ -95,7 +100,6 @@ const groupEventsByCategory = (events: GitHubEvent[]) => {
     return acc
   }, {} as Record<EventCategory, GitHubEvent[]>)
 }
-
 
 // Add function to find related events
 const findRelatedEvents = (events: GitHubEvent[]): Map<string, RelatedEvents> => {
@@ -161,7 +165,6 @@ const findRelatedEvents = (events: GitHubEvent[]): Map<string, RelatedEvents> =>
   return relatedEvents
 }
 
-
 // Add function to find PR references in commit messages
 const findPRReferences = (commitMessage: string, repo: string): { number: number; url: string } | null => {
   // Look for patterns like "PR #123" or "fixes #123" or "closes #123"
@@ -194,29 +197,23 @@ const parseUsernames = (input: string): string[] => {
 function GitHubEventViewerClient() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { toast } = useToast()
+  const { theme, setTheme } = useTheme()
   
   // State
   const [events, setEvents] = useState<GitHubEvent[]>([])
   const [usernames, setUsernames] = useState<string[]>([])
   const [usernameInput, setUsernameInput] = useState("")
-  const [startDate, setStartDate] = useState<Date>(() => {
-    const date = subDays(new Date(), 4)
-    date.setHours(0, 0, 0, 0)
-    return date
-  })
-  const [endDate, setEndDate] = useState<Date>(() => {
-    const date = new Date()
-    date.setHours(23, 59, 59, 999)
-    return date
-  })
+  const [startDate, setStartDate] = useState(startOfDay(subDays(new Date(), 7)))
+  const [endDate, setEndDate] = useState(endOfDay(new Date()))
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-  const [viewMode, setViewMode] = useState<ViewMode>("grouped")
+  const [viewMode, setViewMode] = useState<ViewMode>("timeline")
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
   const [selectedEventTypes, setSelectedEventTypes] = useState<Set<string>>(new Set())
-  const [showFilters, setShowFilters] = useState(true)
+  const [showFilters, setShowFilters] = useState(false)
   const [showQuickDateOptions, setShowQuickDateOptions] = useState(false)
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set())
   const [lastRequestKey, setLastRequestKey] = useState<string>("")
@@ -224,9 +221,96 @@ function GitHubEventViewerClient() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [selectedUsername, setSelectedUsername] = useState<string | null>(null)
 
-  const { theme, setTheme } = useTheme()
-  const { toast } = useToast()
+  // Add helper function to calculate date range duration
+  const getDateRangeDuration = () => {
+    return Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
+  }
 
+  // Add function to navigate periods
+  const navigatePeriod = (direction: 'next' | 'previous') => {
+    const durationDays = getDateRangeDuration()
+    const newStartDate = new Date()
+    const newEndDate = new Date()
+
+    if (direction === 'next') {
+      // Start from the day after current end date
+      newStartDate.setTime(endDate.getTime())
+      newStartDate.setDate(endDate.getDate() + 1)
+      newStartDate.setHours(0, 0, 0, 0)
+      
+      // End date is start date plus duration minus 1 (since start date counts as day 1)
+      newEndDate.setTime(newStartDate.getTime())
+      newEndDate.setDate(newStartDate.getDate() + durationDays - 1)
+      newEndDate.setHours(23, 59, 59, 999)
+    } else {
+      // End date is the day before current start date
+      newEndDate.setTime(startDate.getTime())
+      newEndDate.setDate(startDate.getDate() - 1)
+      newEndDate.setHours(23, 59, 59, 999)
+      
+      // Start date is end date minus duration plus 1 (since end date counts as day 1)
+      newStartDate.setTime(newEndDate.getTime())
+      newStartDate.setDate(newEndDate.getDate() - durationDays + 1)
+      newStartDate.setHours(0, 0, 0, 0)
+    }
+
+    setStartDate(newStartDate)
+    setEndDate(newEndDate)
+    setQuickSelectOpen(false)
+
+    if (usernames.length > 0) {
+      fetchEvents()
+    }
+  }
+
+  // Add function to handle expand all
+  const handleExpandAll = () => {
+    if (expandedGroups.size > 0) {
+      setExpandedGroups(new Set())
+    } else {
+      const allGroups = new Set<string>()
+      events.forEach(event => {
+        const category = getEventCategory(event)
+        if (event.type === "PullRequestEvent" || event.type === "IssuesEvent") {
+          const number = event.payload.pull_request?.number || event.payload.issue?.number
+          if (number) {
+            allGroups.add(`${category}-${number}`)
+          }
+        }
+      })
+      setExpandedGroups(allGroups)
+    }
+  }
+
+  // Add function to copy report
+  const copyReport = async () => {
+    const eventsToExport = getFilteredEvents(events)
+    const reportData = prepareReportData(eventsToExport)
+    
+    // Filter out collapsed sections
+    const visibleReportData = reportData.map(item => ({
+      ...item,
+      sections: item.sections.filter(section => !collapsedSections.has(`${item.title}-${section.title}`))
+    })).filter(item => item.sections.length > 0)
+    
+    // Create plain text version
+    const plainText = formatReportForSlack(visibleReportData)
+
+    try {
+      await navigator.clipboard.writeText(plainText)
+      toast({
+        title: "Copied to clipboard",
+        description: "Summary copied in plain text format",
+      })
+    } catch (err) {
+      console.error('Copy failed:', err)
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
 
   // Load user preferences and handle URL parameters
   useEffect(() => {
@@ -259,8 +343,8 @@ function GitHubEventViewerClient() {
     if (savedPrefs) {
       try {
         const prefs: UserPreferences = JSON.parse(savedPrefs)
-        setStartDate(prefs.startDate ? new Date(prefs.startDate) : subDays(new Date(), 4))
-        setEndDate(prefs.endDate ? new Date(prefs.endDate) : new Date())
+        setStartDate(startOfDay(new Date(prefs.startDate)))
+        setEndDate(endOfDay(new Date(prefs.endDate)))
         setViewMode(prefs.viewMode || "grouped")
         setSelectedRepos(new Set(prefs.selectedRepos || []))
         setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
@@ -462,8 +546,7 @@ function GitHubEventViewerClient() {
   }
 
   // Handle form submission
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = () => {
     const newUsernames = parseUsernames(usernameInput)
     setUsernames(newUsernames)
     fetchEvents()
@@ -785,909 +868,98 @@ function GitHubEventViewerClient() {
     }
   }
 
-  // Update the copy report functionality to exclude collapsed sections
-  const copyReport = async () => {
-    const eventsToExport = getFilteredEvents(events)
-    const reportData = prepareReportData(eventsToExport)
-    
-    // Filter out collapsed sections
-    const visibleReportData = reportData.map(item => ({
-      ...item,
-      sections: item.sections.filter(section => !collapsedSections.has(`${item.title}-${section.title}`))
-    })).filter(item => item.sections.length > 0)
-    
-    // Create HTML version of the report
-    const htmlContent = `
-      <div>
-        <b>GitHub Activity Summary</b>
-        <p>${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}</p>
-        ${visibleReportData.map(item => `
-          <ul>
-            <li>${item.title}</li>
-            ${item.sections.map(section => `
-              <ul>
-                <li>${section.title}</li>
-                <ul>
-                  ${section.items.map(listItem => {
-                    let emoji = '📋'
-                    if (item.title === 'Pull Requests') {
-                      if (section.title === 'Opened') emoji = '🔀'
-                      else if (section.title === 'Reviewed') emoji = '👀'
-                      else if (section.title === 'Merged') emoji = '✅'
-                    } else if (item.title === 'Issues') {
-                      if (section.title === 'Opened') emoji = '❓'
-                      else if (section.title === 'Commented') emoji = '💬'
-                      else if (section.title === 'Closed') emoji = '✅'
-                    }
-                    return `
-                      <li>
-                        <a href="${listItem.url}">${emoji} ${listItem.title}</a>
-                      </li>
-                    `
-                  }).join('')}
-                </ul>
-              </ul>
-            `).join('')}
-          </ul>
-        `).join('')}
-      </div>
-    `
-
-    // Create plain text version
-    const plainText = formatReportForSlack(visibleReportData)
-
-    // Create Blob items for each mime type
-    const blobHtml = new Blob([htmlContent], { type: 'text/html' })
-    const blobPlain = new Blob([plainText], { type: 'text/plain' })
-
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/html': blobHtml,
-          'text/plain': blobPlain
-        })
-      ])
-      
-      toast({
-        title: "Copied to clipboard",
-        description: "Summary copied in both rich text and plain text formats",
-      })
-    } catch (err) {
-      console.error('Copy failed:', err)
-      toast({
-        title: "Copy failed",
-        description: "Could not copy to clipboard. Please try again.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  // Update the renderReport function to include collapse controls
-  const renderReport = () => {
-    const eventsToExport = getFilteredEvents(events)
-    const reportData = prepareReportData(eventsToExport)
-    
-    // Helper function to get actors for a specific item
-    const getItemActors = (url: string) => {
-      return new Map(
-        eventsToExport
-          .filter(e => {
-            const eventUrl = e.payload.pull_request?.html_url || 
-                           e.payload.issue?.html_url || 
-                           e.payload.comment?.html_url
-            return eventUrl === url
-          })
-          .map(e => [e.actor.login, e.actor.avatar_url])
-      )
-    }
-    
-    if (reportData.length === 0) {
-      return (
-        <div className="text-center py-4 text-muted-foreground">
-          No activity to report in this time range.
-        </div>
-      )
-    }
-    
-    return (
-      <div className="space-y-1">
-        <div className="space-y-4">
-          {reportData.map((item, index) => (
-            <div key={index}>
-              <div className="font-semibold text-lg mb-2">{item.title}</div>
-              <div className="pl-4 space-y-2">
-                {item.sections.map((section, sectionIndex) => {
-                  const sectionKey = `${item.title}-${section.title}`
-                  const isCollapsed = collapsedSections.has(sectionKey)
-                  
-                  return (
-                    <div key={sectionIndex} className="mb-2">
-                      <div 
-                        className="font-medium text-base mb-1 flex items-center gap-2 cursor-pointer hover:text-primary"
-                        onClick={() => toggleSection(sectionKey)}
-                      >
-                        {isCollapsed ? (
-                          <ChevronRight className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
-                        <span>{section.title} ({section.items.length})</span>
-                      </div>
-                      {!isCollapsed && (
-                        <div className="pl-4 space-y-1">
-                          {section.items.map((listItem, listIndex) => {
-                            const actors = getItemActors(listItem.url)
-                            return (
-                              <div key={listIndex} className="text-sm flex items-center gap-2">
-                                <a href={listItem.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                                  {listItem.title}
-                                </a>
-                                <div className="flex -space-x-1">
-                                  {Array.from(actors.entries()).map(([login, avatarUrl]) => (
-                                    <img
-                                      key={login}
-                                      src={avatarUrl}
-                                      alt={login}
-                                      title={login}
-                                      className="w-5 h-5 rounded-full border-2 border-background"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        window.open(`https://github.com/${login}`, '_blank')
-                                      }}
-                                      style={{ cursor: 'pointer' }}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  // Add helper function to calculate date range duration
-  const getDateRangeDuration = () => {
-    return Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-  }
-
-  // Add function to navigate periods
-  const navigatePeriod = (direction: 'next' | 'previous') => {
-    const durationDays = getDateRangeDuration()
-    const newStartDate = new Date()
-    const newEndDate = new Date()
-
-    if (direction === 'next') {
-      // Start from the day after current end date
-      newStartDate.setTime(endDate.getTime())
-      newStartDate.setDate(endDate.getDate() + 1)
-      newStartDate.setHours(0, 0, 0, 0)
-      
-      // End date is start date plus duration minus 1 (since start date counts as day 1)
-      newEndDate.setTime(newStartDate.getTime())
-      newEndDate.setDate(newStartDate.getDate() + durationDays - 1)
-      newEndDate.setHours(23, 59, 59, 999)
-    } else {
-      // End date is the day before current start date
-      newEndDate.setTime(startDate.getTime())
-      newEndDate.setDate(startDate.getDate() - 1)
-      newEndDate.setHours(23, 59, 59, 999)
-      
-      // Start date is end date minus duration plus 1 (since end date counts as day 1)
-      newStartDate.setTime(newEndDate.getTime())
-      newStartDate.setDate(newEndDate.getDate() - durationDays + 1)
-      newStartDate.setHours(0, 0, 0, 0)
-    }
-
-    setStartDate(newStartDate)
-    setEndDate(newEndDate)
-    setQuickSelectOpen(false)
-
-    if (usernames.length > 0) {
-      fetchEvents()
-    }
-  }
-
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
-      <header className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">GitHub Event Viewer</h1>
-        <div className="flex items-center gap-4">
-          {lastSynced && (
-            <span className="text-sm text-muted-foreground">
-              Last synced: {format(new Date(lastSynced), "HH:mm:ss")}
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              const newTheme = theme === "dark" ? "light" : "dark"
-              setTheme(newTheme)
-            }}
-            aria-label="Toggle theme"
-          >
-            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </Button>
-        </div>
-      </header>
-
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1">
-                <label htmlFor="username" className="block text-sm font-medium mb-1">
-                  GitHub Usernames
-                </label>
-                <Input
-                  id="username"
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value)}
-                  placeholder="Enter GitHub usernames (comma-separated)"
-                  className="w-full"
-                />
-              </div>
-
-              <div className="flex-1">
-                <label className="block text-sm font-medium mb-1">Date Range</label>
-                <div className="flex flex-col gap-2">
-                  <div className="flex gap-2">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="justify-start text-left font-normal flex-1">
-                          {format(startDate, "EEE, MMM d, yyyy")}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={startDate}
-                          onSelect={(date) => {
-                            if (date) {
-                              const newDate = new Date(date)
-                              newDate.setHours(0, 0, 0, 0)
-                              validateAndSetDates(newDate, endDate)
-                            }
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <span className="flex items-center">to</span>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="justify-start text-left font-normal flex-1">
-                          {format(endDate, "EEE, MMM d, yyyy")}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={endDate}
-                          onSelect={(date) => {
-                            if (date) {
-                              const newDate = new Date(date)
-                              newDate.setHours(23, 59, 59, 999)
-                              validateAndSetDates(startDate, newDate)
-                            }
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <Popover open={quickSelectOpen} onOpenChange={setQuickSelectOpen}>
-                      <PopoverTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-10 w-10">
-                          <ChevronDown className="h-4 w-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-56 p-2" align="end">
-                        <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 flex-1"
-                              onClick={() => navigatePeriod('previous')}
-                            >
-                              Previous
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 flex-1"
-                              onClick={() => navigatePeriod('next')}
-                            >
-                              Next
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-full"
-                              onClick={() => {
-                                setDateRange("today")
-                              }}
-                            >
-                              Today
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-full"
-                              onClick={() => {
-                                setDateRange("threeDays")
-                              }}
-                            >
-                              3 Days
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-full"
-                              onClick={() => {
-                                setDateRange("week")
-                              }}
-                            >
-                              This Week
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-full"
-                              onClick={() => {
-                                setDateRange("month")
-                              }}
-                            >
-                              This Month
-                            </Button>
-                          </div>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-end">
-                <Button type="submit" disabled={!usernameInput || isSyncing} className="h-10">
-                  {isSyncing ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                      Syncing...
-                    </>
-                  ) : (
-                    "Fetch Events"
-                  )}
-                </Button>
-              </div>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <Header lastSynced={lastSynced} />
+      
+      <UserInput
+        usernameInput={usernameInput}
+        onUsernameChange={setUsernameInput}
+        dateRange={{ startDate, endDate }}
+        onDateChange={({ startDate: newStart, endDate: newEnd }) => {
+          validateAndSetDates(newStart, newEnd)
+        }}
+        onSubmit={handleSubmit}
+        isSyncing={isSyncing}
+        onQuickSelect={setDateRange}
+        onNavigatePeriod={navigatePeriod}
+        quickSelectOpen={quickSelectOpen}
+        onQuickSelectOpenChange={setQuickSelectOpen}
+      />
 
       {events.length > 0 && (
         <>
-          <div className="flex justify-between items-center mb-4">
-            <div className="text-sm text-muted-foreground">
-              Time Range: {format(startDate, "MMM d, yyyy")} 00:00 - {format(endDate, "MMM d, yyyy")} 23:59
-            </div>
+          <div className="text-sm text-muted-foreground mb-4">
+            Time Range: {format(startDate, "MMM d, yyyy")} 00:00 - {format(endDate, "MMM d, yyyy")} 23:59
           </div>
 
-          <Card className="mb-6">
-            <CardContent className="pt-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Filters</label>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowFilters(!showFilters)}
-                    className="flex items-center gap-2 text-muted-foreground"
-                  >
-                    <span className="text-xs">
-                      {selectedUsername ? `@${selectedUsername}, ` : ""}{getFilterDescription()}
-                    </span>
-                    {(getActiveFilterCount() > 0 || selectedUsername) && !showFilters && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          clearAllFilters()
-                          setSelectedUsername(null)
-                        }}
-                        className="text-xs text-blue-500 hover:text-blue-600 hover:underline ml-2"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                    {showFilters ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                  </Button>
-                </div>
-                {showFilters && (
-                  <div className="space-y-2 pt-1">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Repositories</label>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {getUniqueRepos(events).map(repo => (
-                          <Button
-                            key={repo}
-                            type="button"
-                            variant={selectedRepos.has(repo) ? "default" : "outline"}
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={() => toggleRepoSelection(repo)}
-                          >
-                            {repo}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
+          <Filters
+            events={events}
+            showFilters={showFilters}
+            onShowFiltersChange={setShowFilters}
+            selectedRepos={selectedRepos}
+            onRepoToggle={toggleRepoSelection}
+            selectedEventTypes={selectedEventTypes}
+            onEventTypeToggle={toggleEventTypeSelection}
+            selectedLabels={selectedLabels}
+            onLabelToggle={toggleLabelSelection}
+            selectedUsername={selectedUsername}
+            onUsernameSelect={setSelectedUsername}
+            usernames={usernames}
+            getUniqueRepos={getUniqueRepos}
+            getUniqueLabels={getUniqueLabels}
+            EVENT_TYPES={EVENT_TYPES}
+            clearAllFilters={clearAllFilters}
+          />
 
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Event Types</label>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {Object.entries(EVENT_TYPES).map(([category, types]) => (
-                          <Button
-                            key={category}
-                            type="button"
-                            variant={selectedEventTypes.has(category) ? "default" : "outline"}
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={() => toggleEventTypeSelection(category as EventCategory)}
-                          >
-                            {category} ({events.filter(e => types.includes(e.type)).length})
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Labels</label>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {getUniqueLabels(events).map(label => (
-                          <Button
-                            key={label}
-                            type="button"
-                            variant={selectedLabels.has(label) ? "default" : "outline"}
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={() => toggleLabelSelection(label)}
-                          >
-                            {label}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {usernames.length > 1 && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">GitHub Users</label>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {usernames.map(username => (
-                            <Button
-                              key={username}
-                              type="button"
-                              variant={selectedUsername === username ? "default" : "outline"}
-                              size="sm"
-                              className="h-6 text-xs"
-                              onClick={() => setSelectedUsername(selectedUsername === username ? null : username)}
-                            >
-                              @{username}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex justify-between items-center mb-2">
-            <div className="inline-flex rounded-md border border-input bg-background">
-              <Button
-                variant={viewMode === "timeline" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("timeline")}
-                className="rounded-r-none border-r"
-              >
-                Timeline
-              </Button>
-              <Button
-                variant={viewMode === "grouped" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("grouped")}
-                className="rounded-none border-r"
-              >
-                Grouped
-              </Button>
-              <Button
-                variant={viewMode === "report" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("report")}
-                className="rounded-l-none"
-              >
-                Summary
-              </Button>
-            </div>
-            {viewMode === "grouped" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const allGroups = Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events)))
-                    .flatMap(([category, numberGroups]) => 
-                      Object.keys(numberGroups).map(number => `${category}-${number}`)
-                    )
-                  if (expandedGroups.size === allGroups.length) {
-                    setExpandedGroups(new Set())
-                  } else {
-                    setExpandedGroups(new Set(allGroups))
-                  }
-                }}
-                className="flex items-center gap-1"
-              >
-                {expandedGroups.size > 0 ? (
-                  <>
-                    Collapse All
-                    <ChevronUp className="h-3 w-3" />
-                  </>
-                ) : (
-                  <>
-                    Expand All
-                    <ChevronDown className="h-3 w-3" />
-                  </>
-                )}
-              </Button>
-            )}
-            {viewMode === "report" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={copyReport}
-                className="flex items-center gap-1"
-              >
-                <ClipboardCopy className="h-4 w-4" />
-                Copy to clipboard
-              </Button>
-            )}
-          </div>
+          <ViewModeSelector
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            onExpandAll={viewMode === "grouped" ? handleExpandAll : undefined}
+            isAllExpanded={expandedGroups.size > 0}
+            onCopyToClipboard={viewMode === "report" ? copyReport : undefined}
+          />
 
           <div className="space-y-3">
-            {viewMode === "grouped" ? (
-              // Grouped view
-              Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events)))
-                .filter(([_, numberGroups]) => Object.values(numberGroups).some(group => group.events.length > 0))
-                .map(([category, numberGroups]) => (
-                  <div key={category} className="space-y-3">
-                    <h2 className="text-sm font-semibold text-muted-foreground">
-                      {category === "Pull Requests" ? "Pull Request Activity" : 
-                       category === "Issues" ? "Issue Activity" : 
-                       "Other Activity"} ({Object.values(numberGroups).reduce((sum, group) => sum + group.events.length, 0)})
-                    </h2>
-                    {Object.entries(numberGroups)
-                      .filter(([_, group]) => group.events.length > 0)
-                      .map(([number, group]) => {
-                        const groupKey = `${category}-${number}`
-                        const isExpanded = (category === "Other") || expandedGroups.has(groupKey)
-                        
-                        // Get unique actors for this group
-                        const actors = new Map<string, string>()
-                        group.events.forEach(event => {
-                          if (!actors.has(event.actor.login)) {
-                            actors.set(event.actor.login, event.actor.avatar_url)
-                          }
-                        })
-
-                        return (
-                          <div key={number} className="space-y-1">
-                            {number !== 'other' && category !== "Other" && (
-                              <div className="pl-2 flex items-center gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={() => {
-                                    const newExpanded = new Set(expandedGroups)
-                                    if (isExpanded) {
-                                      newExpanded.delete(groupKey)
-                                    } else {
-                                      newExpanded.add(groupKey)
-                                    }
-                                    setExpandedGroups(newExpanded)
-                                  }}
-                                >
-                                  {isExpanded ? (
-                                    <ChevronUp className="h-3 w-3" />
-                                  ) : (
-                                    <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </Button>
-                                <a
-                                  href={group.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-medium text-muted-foreground hover:underline"
-                                >
-                                  {truncateMiddle(group.title)}
-                                </a>
-                                <div className="flex -space-x-1 ml-auto">
-                                  {Array.from(actors.entries()).map(([login, avatarUrl]) => (
-                                    <img
-                                      key={login}
-                                      src={avatarUrl}
-                                      alt={login}
-                                      title={login}
-                                      className="w-5 h-5 rounded-full border-2 border-background"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        window.open(`https://github.com/${login}`, '_blank')
-                                      }}
-                                      style={{ cursor: 'pointer' }}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            {isExpanded && group.events.map((event) => {
-                              const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
-                              const eventInfo = getEventSummary(event, relatedEvents)
-                              return (
-                                <Card
-                                  key={event.id}
-                                  className={cn(
-                                    "overflow-hidden transition-all",
-                                    relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
-                                  )}
-                                >
-                                  <CardContent className="p-0">
-                                    <div
-                                      className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                                      onClick={() => toggleEventExpansion(event.id)}
-                                    >
-                                      <div className="text-lg mt-1" aria-hidden="true">
-                                        {getEventEmoji(event.type)}
-                                      </div>
-                                      <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
-                                        {format(new Date(event.created_at), "EEE, MMM d, HH:mm")}
-                                      </span>
-                                      <img
-                                        src={event.actor.avatar_url}
-                                        alt={`${event.actor.login}'s avatar`}
-                                        className="w-5 h-5 rounded-full mt-1"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          window.open(event.actor.url, '_blank')
-                                        }}
-                                      />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-start gap-2">
-                                          <a
-                                            href={getEventUrl(event)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-sm font-medium hover:underline truncate"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            {truncateMiddle(eventInfo.summary)}
-                                          </a>
-                                        </div>
-                                        {eventInfo.title && number === 'other' && (
-                                          <div className="text-xs text-muted-foreground truncate mt-0.5">
-                                            {truncateMiddle(eventInfo.title)}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="ml-auto h-6 w-6 p-0"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          toggleEventExpansion(event.id)
-                                        }}
-                                      >
-                                        {expandedGroups.has(event.id) ? (
-                                          <ChevronUp className="h-3 w-3" />
-                                        ) : (
-                                          <ChevronDown className="h-3 w-3" />
-                                        )}
-                                      </Button>
-                                    </div>
-
-                                    {expandedGroups.has(event.id) && (
-                                      <div className="px-3 pb-2 pt-0">
-                                        <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
-                                          <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </CardContent>
-                                </Card>
-                              )
-                            })}
-                          </div>
-                        )
-                      })}
-                  </div>
-                ))
-            ) : viewMode === "timeline" ? (
-              // Timeline view
-              groupRelatedEventsForTimeline(getFilteredEvents(events)).map((event) => {
-                const relatedEvents = findRelatedEvents(events).get(`${event.repo.name}#${event.payload.pull_request?.number || event.payload.issue?.number}`)
-                const eventInfo = getEventSummary(event, relatedEvents)
-                return (
-                  <Card
-                    key={event.id}
-                    className={cn(
-                      "overflow-hidden transition-all",
-                      relatedEvents?.pr && relatedEvents?.issue && "border-l-4 border-l-primary"
-                    )}
-                  >
-                    <CardContent className="p-0">
-                      <div
-                        className="flex items-start py-2 px-3 cursor-pointer gap-2"
-                        onClick={() => toggleEventExpansion(event.id)}
-                      >
-                        <div className="text-lg mt-1" aria-hidden="true">
-                          {getEventEmoji(event.type)}
-                        </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 mt-1">
-                          {format(new Date(event.created_at), "EEE, MMM d, HH:mm")}
-                        </span>
-                        <img
-                          src={event.actor.avatar_url}
-                          alt={`${event.actor.login}'s avatar`}
-                          className="w-5 h-5 rounded-full mt-1"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            window.open(event.actor.url, '_blank')
-                          }}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start gap-2">
-                            <a
-                              href={getEventUrl(event)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm font-medium hover:underline truncate"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {truncateMiddle(eventInfo.summary)}
-                            </a>
-                          </div>
-                          {eventInfo.title && (
-                            <div className="text-xs text-muted-foreground truncate mt-0.5">
-                              {truncateMiddle(eventInfo.title)}
-                            </div>
-                          )}
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="ml-auto h-6 w-6 p-0"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            toggleEventExpansion(event.id)
-                          }}
-                        >
-                          {expandedGroups.has(event.id) ? (
-                            <ChevronUp className="h-3 w-3" />
-                          ) : (
-                            <ChevronDown className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
-
-                      {expandedGroups.has(event.id) && (
-                        <div className="px-3 pb-2 pt-0">
-                          <div className="bg-muted p-2 rounded-md overflow-auto max-h-96">
-                            <pre className="text-xs">{JSON.stringify(event, null, 2)}</pre>
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )
-              })
-            ) : (
-              // Report view
-              <div className="prose dark:prose-invert max-w-none">
-                {(() => {
-                  const eventsToExport = getFilteredEvents(events)
-                  
-                  // Get unique actors and their avatars
-                  const actors = new Map<string, string>()
-                  eventsToExport.forEach(event => {
-                    if (!actors.has(event.actor.login)) {
-                      actors.set(event.actor.login, event.actor.avatar_url)
-                    }
-                  })
-
-                  return (
-                    <>
-                      {actors.size > 1 && (
-                        <>
-                          <h2 className="text-sm font-semibold text-muted-foreground mt-6 mb-2">Involved People</h2>
-                          <div className="flex gap-2 items-center mb-4">
-                            {Array.from(actors.entries()).map(([login, avatarUrl]) => (
-                              <div
-                                key={login}
-                                className={cn(
-                                  "flex items-center gap-1 p-1 rounded-full transition-colors cursor-pointer",
-                                  selectedUsername === login ? "bg-primary/10" : "hover:bg-muted"
-                                )}
-                                onClick={() => setSelectedUsername(selectedUsername === login ? null : login)}
-                                title={selectedUsername === login ? "Click to show all users" : `Click to filter by @${login}`}
-                              >
-                                <img
-                                  src={avatarUrl}
-                                  alt={login}
-                                  className={cn(
-                                    "w-6 h-6 rounded-full",
-                                    selectedUsername === login ? "ring-2 ring-primary" : ""
-                                  )}
-                                />
-                                <span className="text-xs text-muted-foreground">@{login}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                      <div className="prose dark:prose-invert max-w-none">
-                        {(() => {
-                          return (
-                            <div className="space-y-1">
-                              {renderReport()}
-                            </div>
-                          )
-                        })()}
-                      </div>
-                    </>
-                  )
-                })()}
-              </div>
+            {viewMode === "timeline" && (
+              <TimelineView
+                events={getFilteredEvents(events)}
+                expandedEvents={expandedEvents}
+                onEventExpand={toggleEventExpansion}
+              />
+            )}
+            {viewMode === "grouped" && (
+              <GroupedView
+                events={getFilteredEvents(events)}
+                expandedEvents={expandedEvents}
+                onEventExpand={toggleEventExpansion}
+                expandedGroups={expandedGroups}
+              />
+            )}
+            {viewMode === "report" && (
+              <SummaryView
+                events={getFilteredEvents(events)}
+                startDate={startDate}
+                endDate={endDate}
+                collapsedSections={collapsedSections}
+                onSectionToggle={toggleSection}
+              />
             )}
           </div>
         </>
       )}
 
-      {events.length === 0 && usernames.length > 0 && !isSyncing && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">No events found for these usernames and date range.</p>
-        </div>
-      )}
-
-      {!usernames.length && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">Enter GitHub usernames to view events.</p>
-        </div>
+      {events.length === 0 && (
+        <NoEvents usernames={usernames} isSyncing={isSyncing} />
       )}
     </div>
   )
 }
 
 // Create the main page component
-export default function GitHubEventViewer() {
+export default function Page() {
   return (
-    <Suspense fallback={
-      <div className="container mx-auto px-4 py-8 max-w-5xl">
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<NoEvents usernames={[]} isSyncing={true} />}>
       <GitHubEventViewerClient />
     </Suspense>
   )

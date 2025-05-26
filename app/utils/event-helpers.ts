@@ -2,24 +2,28 @@ import { GitHubEvent, EventCategory, RelatedEvents, Commit } from '../types/gith
 
 // Add function to categorize events
 export const getEventCategory = (event: GitHubEvent): EventCategory => {
-  const prEvents = [
-    "PullRequestEvent",
-    "PullRequestReviewEvent",
-    "PullRequestReviewCommentEvent",
-    "PushEvent"
-  ]
-  
-  const issueEvents = [
-    "IssuesEvent",
-    "IssueCommentEvent"
-  ]
-
-  if (prEvents.includes(event.type)) {
-    return "Pull Requests"
-  } else if (issueEvents.includes(event.type)) {
-    return "Issues"
+  switch (event.type) {
+    case "PullRequestEvent":
+    case "PullRequestReviewEvent":
+    case "PullRequestReviewCommentEvent":
+      return "Pull Requests"
+    case "IssuesEvent":
+    case "IssueCommentEvent":
+      return "Issues"
+    case "PushEvent":
+      return "Commits"
+    case "CreateEvent":
+    case "DeleteEvent":
+    case "ForkEvent":
+    case "WatchEvent":
+    case "ReleaseEvent":
+    case "PublicEvent":
+    case "MemberEvent":
+    case "GollumEvent":
+      return "Repository"
+    default:
+      return "Other"
   }
-  return "Other"
 }
 
 // Add function to group events by category
@@ -36,8 +40,7 @@ export const groupEventsByCategory = (events: GitHubEvent[]) => {
 
 // Add function to group events by category and number
 export const groupEventsByCategoryAndNumber = (events: GitHubEvent[]) => {
-  const categoryGroups = groupEventsByCategory(events)
-  const result: Record<EventCategory, Record<string, { events: GitHubEvent[], title: string, url: string }>> = {
+  const groups: Record<EventCategory, Record<string, { title: string; url: string; events: GitHubEvent[] }>> = {
     "Pull Requests": {},
     "Issues": {},
     "Commits": {},
@@ -45,52 +48,37 @@ export const groupEventsByCategoryAndNumber = (events: GitHubEvent[]) => {
     "Other": {}
   }
 
-  // Group PR events by PR number
-  categoryGroups["Pull Requests"]?.forEach(event => {
-    const prNumber = event.payload.pull_request?.number
-    if (prNumber) {
-      const key = `PR #${prNumber}`
-      if (!result["Pull Requests"][key]) {
-        result["Pull Requests"][key] = {
-          events: [],
-          title: event.payload.pull_request?.title || "",
-          url: event.payload.pull_request?.html_url || `https://github.com/${event.repo.name}/pull/${prNumber}`
-        }
-      }
-      result["Pull Requests"][key].events.push(event)
-    } else {
-      if (!result["Pull Requests"]['other']) {
-        result["Pull Requests"]['other'] = { events: [], title: "", url: "" }
-      }
-      result["Pull Requests"]['other'].events.push(event)
+  events.forEach(event => {
+    const category = getEventCategory(event)
+    let number = "other"
+    let title = ""
+    let url = getEventUrl(event)
+
+    switch (event.type) {
+      case "PullRequestEvent":
+      case "PullRequestReviewEvent":
+      case "PullRequestReviewCommentEvent":
+        number = event.payload.pull_request?.number?.toString() || "other"
+        title = event.payload.pull_request?.title || ""
+        break
+      case "IssuesEvent":
+      case "IssueCommentEvent":
+        number = event.payload.issue?.number?.toString() || "other"
+        title = event.payload.issue?.title || ""
+        break
     }
+
+    if (!groups[category][number]) {
+      groups[category][number] = {
+        title,
+        url,
+        events: []
+      }
+    }
+    groups[category][number].events.push(event)
   })
 
-  // Group Issue events by issue number
-  categoryGroups["Issues"]?.forEach(event => {
-    const issueNumber = event.payload.issue?.number
-    if (issueNumber) {
-      const key = `Issue #${issueNumber}`
-      if (!result["Issues"][key]) {
-        result["Issues"][key] = {
-          events: [],
-          title: event.payload.issue?.title || "",
-          url: event.payload.issue?.html_url || `https://github.com/${event.repo.name}/issues/${issueNumber}`
-        }
-      }
-      result["Issues"][key].events.push(event)
-    } else {
-      if (!result["Issues"]['other']) {
-        result["Issues"]['other'] = { events: [], title: "", url: "" }
-      }
-      result["Issues"]['other'].events.push(event)
-    }
-  })
-
-  // Keep Other events as is
-  result["Other"] = { 'other': { events: categoryGroups["Other"] || [], title: "", url: "" } }
-
-  return result
+  return groups
 }
 
 // Add function to find related events
