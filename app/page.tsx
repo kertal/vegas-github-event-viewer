@@ -1196,53 +1196,62 @@ function GitHubEventViewerClient() {
           </Card>
 
           <div className="flex justify-between items-center mb-2">
-            <div className="flex items-center gap-2">
-              <div className="inline-flex rounded-md border border-input bg-background">
-                <Button
-                  variant={viewMode === "grouped" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setViewMode("grouped")}
-                  className="rounded-r-none border-r"
-                >
-                  Grouped
-                </Button>
-                <Button
-                  variant={viewMode === "timeline" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setViewMode("timeline")}
-                  className="rounded-none border-r"
-                >
-                  Timeline
-                </Button>
-                <Button
-                  variant={viewMode === "report" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setViewMode("report")}
-                  className="rounded-l-none"
-                >
-                  Report
-                </Button>
-              </div>
-              {viewMode === "grouped" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const allGroups = Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events)))
-                      .flatMap(([category, numberGroups]) => 
-                        Object.keys(numberGroups).map(number => `${category}-${number}`)
-                      )
-                    if (expandedGroups.size === allGroups.length) {
-                      setExpandedGroups(new Set())
-                    } else {
-                      setExpandedGroups(new Set(allGroups))
-                    }
-                  }}
-                >
-                  {expandedGroups.size > 0 ? "Collapse All" : "Expand All"}
-                </Button>
-              )}
+            <div className="inline-flex rounded-md border border-input bg-background">
+              <Button
+                variant={viewMode === "grouped" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("grouped")}
+                className="rounded-r-none border-r"
+              >
+                Grouped
+              </Button>
+              <Button
+                variant={viewMode === "timeline" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("timeline")}
+                className="rounded-none border-r"
+              >
+                Timeline
+              </Button>
+              <Button
+                variant={viewMode === "report" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("report")}
+                className="rounded-l-none"
+              >
+                Report
+              </Button>
             </div>
+            {viewMode === "grouped" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const allGroups = Object.entries(groupEventsByCategoryAndNumber(getFilteredEvents(events)))
+                    .flatMap(([category, numberGroups]) => 
+                      Object.keys(numberGroups).map(number => `${category}-${number}`)
+                    )
+                  if (expandedGroups.size === allGroups.length) {
+                    setExpandedGroups(new Set())
+                  } else {
+                    setExpandedGroups(new Set(allGroups))
+                  }
+                }}
+                className="flex items-center gap-1"
+              >
+                {expandedGroups.size > 0 ? (
+                  <>
+                    Collapse All
+                    <ChevronUp className="h-3 w-3" />
+                  </>
+                ) : (
+                  <>
+                    Expand All
+                    <ChevronDown className="h-3 w-3" />
+                  </>
+                )}
+              </Button>
+            )}
           </div>
 
           <div className="space-y-3">
