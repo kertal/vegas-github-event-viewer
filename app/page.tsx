@@ -302,6 +302,24 @@ function GitHubEventViewerClient() {
     }
   }, [usernames, router, searchParams])
 
+  // Add effect to handle view mode URL state
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    const urlViewMode = params.get('view') as ViewMode | null
+    
+    // If URL has a valid view mode, use it
+    if (urlViewMode && ['timeline', 'grouped', 'report'].includes(urlViewMode)) {
+      setViewMode(urlViewMode)
+    }
+  }, [searchParams]) // Only run when URL params change
+
+  // Update URL when view mode changes
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('view', viewMode)
+    router.push(`?${params.toString()}`, { scroll: false })
+  }, [viewMode, router, searchParams])
+
   // Add effect to trigger fetchEvents when usernames are loaded
   useEffect(() => {
     if (usernames.length > 0) {
@@ -790,14 +808,14 @@ function GitHubEventViewerClient() {
       ])
       
       toast({
-        title: "Report copied",
-        description: "The report has been copied to your clipboard in both rich text and Slack format",
+        title: "Copied to clipboard",
+        description: "Summary copied in both rich text and plain text formats",
       })
     } catch (err) {
       console.error('Copy failed:', err)
       toast({
         title: "Copy failed",
-        description: "Failed to copy the report to clipboard",
+        description: "Could not copy to clipboard. Please try again.",
         variant: "destructive",
       })
     }
@@ -1252,6 +1270,17 @@ function GitHubEventViewerClient() {
                 )}
               </Button>
             )}
+            {viewMode === "report" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copyReport}
+                className="flex items-center gap-1"
+              >
+                <ClipboardCopy className="h-4 w-4" />
+                Copy to clipboard
+              </Button>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -1533,16 +1562,6 @@ function GitHubEventViewerClient() {
                             </div>
                           )
                         })()}
-                      </div>
-                      <div className="mt-6 flex justify-center">
-                        <Button
-                          variant="default"
-                          size="lg"
-                          onClick={copyReport}
-                        >
-                          <ClipboardCopy className="mr-2 h-4 w-4" />
-                          Export to Slack
-                        </Button>
                       </div>
                     </>
                   )
