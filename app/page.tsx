@@ -1198,20 +1198,20 @@ function GitHubEventViewerClient() {
           <div className="flex justify-between items-center mb-2">
             <div className="inline-flex rounded-md border border-input bg-background">
               <Button
-                variant={viewMode === "grouped" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("grouped")}
-                className="rounded-r-none border-r"
-              >
-                Grouped
-              </Button>
-              <Button
                 variant={viewMode === "timeline" ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setViewMode("timeline")}
-                className="rounded-none border-r"
+                className="rounded-r-none border-r"
               >
                 Timeline
+              </Button>
+              <Button
+                variant={viewMode === "grouped" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("grouped")}
+                className="rounded-none border-r"
+              >
+                Grouped
               </Button>
               <Button
                 variant={viewMode === "report" ? "default" : "ghost"}
@@ -1219,7 +1219,7 @@ function GitHubEventViewerClient() {
                 onClick={() => setViewMode("report")}
                 className="rounded-l-none"
               >
-                Report
+                Summary
               </Button>
             </div>
             {viewMode === "grouped" && (
