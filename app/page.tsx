@@ -222,6 +222,7 @@ function GitHubEventViewerClient() {
   const [lastRequestKey, setLastRequestKey] = useState<string>("")
   const [quickSelectOpen, setQuickSelectOpen] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const [selectedUsername, setSelectedUsername] = useState<string | null>(null)
 
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
@@ -391,6 +392,11 @@ function GitHubEventViewerClient() {
   const getFilteredEvents = (events: GitHubEvent[]): GitHubEvent[] => {
     let filtered = events
 
+    // Filter by username if selected
+    if (selectedUsername) {
+      filtered = filtered.filter(event => event.actor.login === selectedUsername)
+    }
+
     // Filter by repository - show all repositories if none selected
     if (selectedRepos.size > 0) {
       filtered = filtered.filter(event => selectedRepos.has(event.repo.name))
@@ -430,6 +436,7 @@ function GitHubEventViewerClient() {
     setSelectedRepos(new Set())
     setSelectedEventTypes(new Set())
     setSelectedLabels(new Set())
+    setSelectedUsername(null)
   }
 
   // Get count of active filters
@@ -1188,12 +1195,15 @@ function GitHubEventViewerClient() {
                     onClick={() => setShowFilters(!showFilters)}
                     className="flex items-center gap-2 text-muted-foreground"
                   >
-                    <span className="text-xs">{getFilterDescription()}</span>
-                    {getActiveFilterCount() > 0 && !showFilters && (
+                    <span className="text-xs">
+                      {selectedUsername ? `@${selectedUsername}, ` : ""}{getFilterDescription()}
+                    </span>
+                    {(getActiveFilterCount() > 0 || selectedUsername) && !showFilters && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           clearAllFilters()
+                          setSelectedUsername(null)
                         }}
                         className="text-xs text-blue-500 hover:text-blue-600 hover:underline ml-2"
                       >
@@ -1258,6 +1268,26 @@ function GitHubEventViewerClient() {
                         ))}
                       </div>
                     </div>
+
+                    {usernames.length > 1 && (
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground">GitHub Users</label>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {usernames.map(username => (
+                            <Button
+                              key={username}
+                              type="button"
+                              variant={selectedUsername === username ? "default" : "outline"}
+                              size="sm"
+                              className="h-6 text-xs"
+                              onClick={() => setSelectedUsername(selectedUsername === username ? null : username)}
+                            >
+                              @{username}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1592,15 +1622,25 @@ function GitHubEventViewerClient() {
                           <h2 className="text-sm font-semibold text-muted-foreground mt-6 mb-2">Involved People</h2>
                           <div className="flex gap-2 items-center mb-4">
                             {Array.from(actors.entries()).map(([login, avatarUrl]) => (
-                              <img
+                              <div
                                 key={login}
-                                src={avatarUrl}
-                                alt={login}
-                                className="w-6 h-6 rounded-full"
-                                title={login}
-                                onClick={() => window.open(`https://github.com/${login}`, '_blank')}
-                                style={{ cursor: 'pointer' }}
-                              />
+                                className={cn(
+                                  "flex items-center gap-1 p-1 rounded-full transition-colors cursor-pointer",
+                                  selectedUsername === login ? "bg-primary/10" : "hover:bg-muted"
+                                )}
+                                onClick={() => setSelectedUsername(selectedUsername === login ? null : login)}
+                                title={selectedUsername === login ? "Click to show all users" : `Click to filter by @${login}`}
+                              >
+                                <img
+                                  src={avatarUrl}
+                                  alt={login}
+                                  className={cn(
+                                    "w-6 h-6 rounded-full",
+                                    selectedUsername === login ? "ring-2 ring-primary" : ""
+                                  )}
+                                />
+                                <span className="text-xs text-muted-foreground">@{login}</span>
+                              </div>
                             ))}
                           </div>
                         </>
