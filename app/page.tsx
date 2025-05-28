@@ -23,6 +23,7 @@ import { TimelineView } from "./components/GitHubEventViewer/TimelineView"
 import { GroupedView } from "./components/GitHubEventViewer/GroupedView"
 import { SummaryView } from "./components/GitHubEventViewer/SummaryView"
 import { NoEvents } from "./components/GitHubEventViewer/NoEvents"
+import { validateDateRange } from "./utils/date-helpers"
 
 // Add event type constants
 const EVENT_TYPES: Record<EventCategory, string[]> = {
@@ -620,33 +621,11 @@ function GitHubEventViewerClient() {
 
   // Helper function to validate and set dates
   const validateAndSetDates = (newStartDate: Date | null, newEndDate: Date | null) => {
-    if (!newStartDate || !newEndDate) return
+    const validRange = validateDateRange(newStartDate, newEndDate)
+    if (!validRange) return
 
-    // Ensure we're working with copies
-    const start = new Date(newStartDate)
-    const end = new Date(newEndDate)
-
-    // If start date is after end date, adjust the other date
-    if (start > end) {
-      if (start === newStartDate) {
-        // If setting start date, move end date forward
-        end.setTime(start.getTime())
-        end.setHours(23, 59, 59, 999)
-        setEndDate(end)
-      } else {
-        // If setting end date, move start date backward
-        start.setTime(end.getTime())
-        start.setHours(0, 0, 0, 0)
-        setStartDate(start)
-      }
-    }
-
-    // Set the date that was actually changed
-    if (start === newStartDate) {
-      setStartDate(start)
-    } else {
-      setEndDate(end)
-    }
+    setStartDate(validRange.startDate)
+    setEndDate(validRange.endDate)
   }
 
   // Get unique repositories from events
