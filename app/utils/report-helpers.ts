@@ -11,6 +11,13 @@ interface ReportItem {
   }[]
 }
 
+// Helper function to truncate text in the middle
+const truncateMiddle = (text: string, maxLength: number = 100): string => {
+  if (text.length <= maxLength) return text
+  const halfLength = Math.floor((maxLength - 3) / 2)
+  return `${text.slice(0, halfLength)}...${text.slice(-halfLength)}`
+}
+
 export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
   const reportData: ReportItem[] = []
 
@@ -156,7 +163,7 @@ export const formatReportForSlack = (reportData: ReportItem[]): string => {
     category.sections.forEach(section => {
       text += `${categoryPrefix} - ${section.title}\n`
       section.items.forEach(item => {
-        text += `• [${item.title}](${item.url})\n`
+        text += `• [${truncateMiddle(item.title)}](${item.url})\n`
       })
       text += "\n" // Always add a blank line after each section, even if empty
     })
@@ -183,11 +190,14 @@ export const formatReportAsHtml = (reportData: ReportItem[]): string => {
     category.sections.forEach(section => {
       html += `<h3>${escapeHtml(categoryPrefix)} - ${escapeHtml(section.title)}</h3>\n<ul>\n`
       section.items.forEach(item => {
-        html += `  <li><a href="${escapeHtml(item.url)}">${escapeHtml(item.title)}</a></li>\n`
+        html += `  <li><a href="${escapeHtml(item.url)}">${escapeHtml(truncateMiddle(item.title))}</a></li>\n`
       })
       html += `</ul>\n\n`
     })
   })
 
   return html
-} 
+}
+
+// Export truncateMiddle for testing
+export { truncateMiddle } 

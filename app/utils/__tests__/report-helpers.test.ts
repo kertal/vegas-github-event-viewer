@@ -1,5 +1,5 @@
 import { GitHubEvent } from "../../types/github"
-import { prepareReportData, formatReportForSlack, formatReportAsHtml } from "../report-helpers"
+import { prepareReportData, formatReportForSlack, formatReportAsHtml, truncateMiddle } from "../report-helpers"
 
 describe('report formatting', () => {
   const mockReportData = [
@@ -55,6 +55,28 @@ describe('report formatting', () => {
     }
   ]
 
+  describe('truncateMiddle', () => {
+    it('should not truncate text shorter than max length', () => {
+      const text = "Short text"
+      expect(truncateMiddle(text)).toBe(text)
+    })
+
+    it('should truncate text longer than max length', () => {
+      const text = "This is a very long text that should be truncated in the middle because it exceeds the maximum length"
+      const result = truncateMiddle(text)
+      expect(result.length).toBeLessThanOrEqual(100)
+      expect(result).toContain('...')
+      expect(result).toMatch(/^This.*\.\.\..*length$/)
+    })
+
+    it('should handle custom max length', () => {
+      const text = "This text should be truncated at 20 characters"
+      const result = truncateMiddle(text, 20)
+      expect(result.length).toBeLessThanOrEqual(20)
+      expect(result).toContain('...')
+    })
+  })
+
   describe('formatReportForSlack', () => {
     it('should format report data correctly for Slack', () => {
       const result = formatReportForSlack(mockReportData)
@@ -94,6 +116,25 @@ describe('report formatting', () => {
       const result = formatReportForSlack(emptySection)
       expect(result).toContain('PRs - Opened')
       expect(result.trim().split('\n').length).toBe(1) // Just the header, since we don't need a blank line for empty sections
+    })
+
+    it('should truncate long titles', () => {
+      const longTitleData = [{
+        title: "Pull Requests",
+        sections: [{
+          title: "Opened",
+          items: [{
+            title: "This is an extremely long pull request title that goes into great detail about the changes made and should definitely be truncated in the middle to maintain readability",
+            url: "https://github.com/org/repo/pull/1"
+          }]
+        }]
+      }]
+      const result = formatReportForSlack(longTitleData)
+      const lines = result.split('\n')
+      const titleLine = lines.find(line => line.startsWith('•'))
+      expect(titleLine).toBeDefined()
+      expect(titleLine!.length).toBeLessThanOrEqual(150) // Account for markdown link syntax
+      expect(titleLine).toContain('...')
     })
   })
 
@@ -158,6 +199,24 @@ describe('report formatting', () => {
       const result = formatReportAsHtml(dataWithHtml)
       expect(result).not.toContain('<script>')
       expect(result).toContain('&lt;script&gt;')
+    })
+
+    it('should truncate long titles', () => {
+      const longTitleData = [{
+        title: "Pull Requests",
+        sections: [{
+          title: "Opened",
+          items: [{
+            title: "This is an extremely long pull request title that goes into great detail about the changes made and should definitely be truncated in the middle to maintain readability",
+            url: "https://github.com/org/repo/pull/1"
+          }]
+        }]
+      }]
+      const result = formatReportAsHtml(longTitleData)
+      expect(result).toContain('...')
+      const titleMatch = result.match(/>([^<]+)</)?.[1] // Extract text between > and <
+      expect(titleMatch).toBeDefined()
+      expect(titleMatch!.length).toBeLessThanOrEqual(100)
     })
   })
 }) 
