@@ -1,4 +1,4 @@
-import { GitHubEvent } from "@/types/github"
+import { GitHubEvent } from "../types/github"
 
 interface ReportItem {
   title: string
@@ -105,18 +105,6 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
         break
       }
 
-      case "PushEvent": {
-        const commits = event.payload.commits || []
-        const branch = event.payload.ref?.replace("refs/heads/", "")
-        
-        commits.forEach(commit => {
-          const title = `[${branch}] ${commit.message.split("\n")[0]}`
-          const url = `https://github.com/${event.repo.name}/commit/${commit.sha}`
-          addToSection("Commits", "Pushed", title, url)
-        })
-        break
-      }
-
       // Add other event types as needed
       default:
         // Handle other events if needed
@@ -132,8 +120,7 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
       "Reviewed": 2,
       "Merged": 3,
       "Commented": 4,
-      "Closed": 5,
-      "Pushed": 6
+      "Closed": 5
     }
     
     category.sections.sort((a, b) => {
@@ -148,8 +135,8 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
     })
   })
 
-  // Sort categories by priority
-  const categoryOrder = ["Pull Requests", "Issues", "Commits"]
+  // Sort categories by priority (only Pull Requests and Issues)
+  const categoryOrder = ["Pull Requests", "Issues"]
   reportData.sort((a, b) => {
     const orderA = categoryOrder.indexOf(a.title)
     const orderB = categoryOrder.indexOf(b.title)
