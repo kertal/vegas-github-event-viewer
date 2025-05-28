@@ -152,15 +152,42 @@ export const formatReportForSlack = (reportData: ReportItem[]): string => {
   let text = ""
 
   reportData.forEach(category => {
-    text += `*${category.title}*\n`
+    const categoryPrefix = category.title === "Pull Requests" ? "PRs" : category.title
     category.sections.forEach(section => {
-      text += `  ${section.title}\n`
+      text += `${categoryPrefix} - ${section.title}\n`
       section.items.forEach(item => {
-        text += `    • ${item.title}\n      ${item.url}\n`
+        text += `• [${item.title}](${item.url})\n`
       })
+      text += "\n" // Always add a blank line after each section, even if empty
     })
-    text += "\n"
   })
 
   return text
+}
+
+export const formatReportAsHtml = (reportData: ReportItem[]): string => {
+  // Helper function to escape HTML
+  const escapeHtml = (text: string) => {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;")
+  }
+
+  let html = ""
+
+  reportData.forEach(category => {
+    const categoryPrefix = category.title === "Pull Requests" ? "PRs" : category.title
+    category.sections.forEach(section => {
+      html += `<h3>${escapeHtml(categoryPrefix)} - ${escapeHtml(section.title)}</h3>\n<ul>\n`
+      section.items.forEach(item => {
+        html += `  <li><a href="${escapeHtml(item.url)}">${escapeHtml(item.title)}</a></li>\n`
+      })
+      html += `</ul>\n\n`
+    })
+  })
+
+  return html
 } 

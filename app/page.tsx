@@ -14,7 +14,7 @@ import { useTheme } from "next-themes"
 import { cn } from "./lib/utils"
 import { GitHubEvent, EventCategory, ViewMode, UserPreferences } from "./types/github"
 import { getEventCategory, groupEventsByCategoryAndNumber, groupRelatedEventsForTimeline, getEventSummary } from "./utils/event-helpers"
-import { prepareReportData, formatReportForSlack } from "./utils/report-helpers"
+import { prepareReportData, formatReportForSlack, formatReportAsHtml } from "./utils/report-helpers"
 import { Header } from "./components/GitHubEventViewer/Header"
 import { UserInput } from "./components/GitHubEventViewer/UserInput"
 import { Filters } from "./components/GitHubEventViewer/Filters"
@@ -294,22 +294,40 @@ function GitHubEventViewerClient() {
       sections: item.sections.filter(section => !collapsedSections.has(`${item.title}-${section.title}`))
     })).filter(item => item.sections.length > 0)
     
-    // Create plain text version
-    const plainText = formatReportForSlack(visibleReportData)
-
     try {
-      await navigator.clipboard.writeText(plainText)
+      // Create both text and HTML versions
+      const plainText = formatReportForSlack(visibleReportData)
+      const htmlContent = formatReportAsHtml(visibleReportData)
+
+      // Create a clipboard item with both formats
+      const clipboardItem = new ClipboardItem({
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+        'text/html': new Blob([htmlContent], { type: 'text/html' })
+      })
+
+      await navigator.clipboard.write([clipboardItem])
       toast({
         title: "Copied to clipboard",
-        description: "Summary copied in plain text format",
+        description: "Summary copied in both text and HTML formats",
       })
     } catch (err) {
       console.error('Copy failed:', err)
-      toast({
-        title: "Copy failed",
-        description: "Could not copy to clipboard. Please try again.",
-        variant: "destructive",
-      })
+      // Fallback to plain text only if HTML copy fails
+      try {
+        const plainText = formatReportForSlack(visibleReportData)
+        await navigator.clipboard.writeText(plainText)
+        toast({
+          title: "Copied to clipboard",
+          description: "Summary copied in text format only",
+        })
+      } catch (fallbackErr) {
+        console.error('Fallback copy failed:', fallbackErr)
+        toast({
+          title: "Copy failed",
+          description: "Could not copy to clipboard. Please try again.",
+          variant: "destructive",
+        })
+      }
     }
   }
 
