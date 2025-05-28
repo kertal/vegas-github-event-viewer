@@ -6,6 +6,7 @@ import { Card, CardContent } from "../../../components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover"
 import { Calendar } from "../../../components/ui/calendar"
 import { DateRange } from "../../types/github"
+import { cn } from "../../../lib/utils"
 
 interface UserInputProps {
   usernameInput: string
@@ -18,6 +19,7 @@ interface UserInputProps {
   onNavigatePeriod: (direction: 'next' | 'previous') => void
   quickSelectOpen: boolean
   onQuickSelectOpenChange: (open: boolean) => void
+  hasPendingChanges?: boolean
 }
 
 export function UserInput({
@@ -30,7 +32,8 @@ export function UserInput({
   onQuickSelect,
   onNavigatePeriod,
   quickSelectOpen,
-  onQuickSelectOpenChange
+  onQuickSelectOpenChange,
+  hasPendingChanges = false
 }: UserInputProps) {
   return (
     <Card className="mb-6">
@@ -153,14 +156,24 @@ export function UserInput({
             </div>
 
             <div className="flex items-end">
-              <Button type="submit" disabled={!usernameInput || isSyncing} className="h-10">
+              <Button 
+                type="submit" 
+                disabled={!usernameInput || isSyncing} 
+                className={cn(
+                  "h-10",
+                  hasPendingChanges && "bg-yellow-600 hover:bg-yellow-700"
+                )}
+              >
                 {isSyncing ? (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                     Syncing...
                   </>
                 ) : (
-                  "Fetch Events"
+                  <>
+                    {hasPendingChanges && <RefreshCw className="mr-2 h-4 w-4" />}
+                    {hasPendingChanges ? "Fetch" : "Refresh"}
+                  </>
                 )}
               </Button>
             </div>

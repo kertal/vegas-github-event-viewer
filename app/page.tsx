@@ -221,6 +221,7 @@ function GitHubEventViewerClient() {
   const [quickSelectOpen, setQuickSelectOpen] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [selectedUsername, setSelectedUsername] = useState<string | null>(null)
+  const [hasPendingChanges, setHasPendingChanges] = useState(false)
 
   // Add helper function to calculate date range duration
   const getDateRangeDuration = () => {
@@ -255,13 +256,8 @@ function GitHubEventViewerClient() {
       newStartDate.setHours(0, 0, 0, 0)
     }
 
-    setStartDate(newStartDate)
-    setEndDate(newEndDate)
+    validateAndSetDates(newStartDate, newEndDate)
     setQuickSelectOpen(false)
-
-    if (usernames.length > 0) {
-      fetchEvents()
-    }
   }
 
   // Add function to handle expand all
@@ -337,10 +333,26 @@ function GitHubEventViewerClient() {
     const urlUsernames = searchParams.get('usernames')
     const parsedUrlUsernames = urlUsernames ? parseUsernames(urlUsernames) : []
     
+    // Get dates from URL
+    const urlStartDate = searchParams.get('startDate')
+    const urlEndDate = searchParams.get('endDate')
+    let newStartDate = startDate
+    let newEndDate = endDate
+
+    if (urlStartDate && urlEndDate) {
+      const parsedStart = new Date(urlStartDate)
+      const parsedEnd = new Date(urlEndDate)
+      if (!isNaN(parsedStart.getTime()) && !isNaN(parsedEnd.getTime())) {
+        newStartDate = startOfDay(parsedStart)
+        newEndDate = endOfDay(parsedEnd)
+      }
+    }
+    
     // If URL has valid usernames, use them
     if (parsedUrlUsernames.length > 0) {
       setUsernames(parsedUrlUsernames)
       setUsernameInput(parsedUrlUsernames.join(', '))
+      setHasPendingChanges(true)
     } else {
       // Otherwise, try to load from localStorage
       const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
@@ -350,6 +362,12 @@ function GitHubEventViewerClient() {
           if (prefs.usernames && prefs.usernames.length > 0) {
             setUsernames(prefs.usernames)
             setUsernameInput(prefs.usernames.join(', '))
+            setHasPendingChanges(true)
+          }
+          // Only use saved dates if no URL dates
+          if (!urlStartDate && !urlEndDate) {
+            newStartDate = startOfDay(new Date(prefs.startDate))
+            newEndDate = endOfDay(new Date(prefs.endDate))
           }
         } catch (error) {
           console.error("Error parsing saved preferences:", error)
@@ -357,13 +375,15 @@ function GitHubEventViewerClient() {
       }
     }
 
+    // Set the dates
+    setStartDate(newStartDate)
+    setEndDate(newEndDate)
+
     // Load other preferences from localStorage
     const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
     if (savedPrefs) {
       try {
         const prefs: UserPreferences = JSON.parse(savedPrefs)
-        setStartDate(startOfDay(new Date(prefs.startDate)))
-        setEndDate(endOfDay(new Date(prefs.endDate)))
         setViewMode(prefs.viewMode || "grouped")
         setSelectedRepos(new Set(prefs.selectedRepos || []))
         setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
@@ -393,6 +413,14 @@ function GitHubEventViewerClient() {
       setLastSynced(lastSync)
     }
   }, [searchParams]) // Add searchParams as dependency
+
+  // Update URL when dates change
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('startDate', startDate.toISOString().split('T')[0])
+    params.set('endDate', endDate.toISOString().split('T')[0])
+    router.push(`?${params.toString()}`, { scroll: false })
+  }, [startDate, endDate, router, searchParams])
 
   // Update URL when usernames change
   useEffect(() => {
@@ -424,13 +452,6 @@ function GitHubEventViewerClient() {
     params.set('view', viewMode)
     router.push(`?${params.toString()}`, { scroll: false })
   }, [viewMode, router, searchParams])
-
-  // Add effect to trigger fetchEvents when usernames are loaded
-  useEffect(() => {
-    if (usernames.length > 0) {
-      fetchEvents()
-    }
-  }, [usernames]) // Only trigger when usernames change
 
   // Save preferences to localStorage when they change
   useEffect(() => {
@@ -567,8 +588,13 @@ function GitHubEventViewerClient() {
   // Handle form submission
   const handleSubmit = () => {
     const newUsernames = parseUsernames(usernameInput)
-    setUsernames(newUsernames)
-    fetchEvents()
+    if (newUsernames.join(',') !== usernames.join(',')) {
+      setUsernames(newUsernames)
+      setHasPendingChanges(true)
+    } else {
+      setUsernames(newUsernames)
+      fetchEvents()
+    }
   }
 
   // Set date range presets
@@ -628,13 +654,8 @@ function GitHubEventViewerClient() {
         end.setHours(23, 59, 59, 999)
     }
 
-    setStartDate(start)
-    setEndDate(end)
+    validateAndSetDates(start, end)
     setQuickSelectOpen(false)
-    // Automatically submit the form after setting the date range
-    if (usernames.length > 0) {
-      fetchEvents()
-    }
   }
 
   // Helper function to validate and set dates
@@ -642,8 +663,13 @@ function GitHubEventViewerClient() {
     const validRange = validateDateRange(newStartDate, newEndDate)
     if (!validRange) return
 
-    setStartDate(validRange.startDate)
-    setEndDate(validRange.endDate)
+    // Only set pending changes if dates actually changed
+    if (validRange.startDate.getTime() !== startDate.getTime() || 
+        validRange.endDate.getTime() !== endDate.getTime()) {
+      setStartDate(validRange.startDate)
+      setEndDate(validRange.endDate)
+      setHasPendingChanges(true)
+    }
   }
 
   // Get unique repositories from events
@@ -688,6 +714,7 @@ function GitHubEventViewerClient() {
 
     setIsSyncing(true)
     setLastRequestKey(requestKey)
+    setHasPendingChanges(false)
 
     try {
       const allEvents: GitHubEvent[] = []
@@ -882,6 +909,7 @@ function GitHubEventViewerClient() {
         onNavigatePeriod={navigatePeriod}
         quickSelectOpen={quickSelectOpen}
         onQuickSelectOpenChange={setQuickSelectOpen}
+        hasPendingChanges={hasPendingChanges}
       />
 
       {events.length > 0 && (

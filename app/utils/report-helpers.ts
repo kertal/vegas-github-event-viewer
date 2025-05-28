@@ -11,11 +11,32 @@ interface ReportItem {
   }[]
 }
 
+interface TimeRange {
+  startDate: Date
+  endDate: Date
+}
+
 // Helper function to truncate text in the middle
 const truncateMiddle = (text: string, maxLength: number = 100): string => {
   if (text.length <= maxLength) return text
   const halfLength = Math.floor((maxLength - 3) / 2)
   return `${text.slice(0, halfLength)}...${text.slice(-halfLength)}`
+}
+
+// Helper function to format date for URL
+const formatDateForUrl = (date: Date): string => {
+  try {
+    return date.toISOString().split('T')[0] // YYYY-MM-DD format
+  } catch (error) {
+    // Return a default date if the date is invalid
+    return new Date().toISOString().split('T')[0]
+  }
+}
+
+// Helper function to parse date from URL
+export const parseDateFromUrl = (dateStr: string): Date | null => {
+  const date = new Date(dateStr)
+  return isNaN(date.getTime()) ? null : date
 }
 
 export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
@@ -155,15 +176,30 @@ export const prepareReportData = (events: GitHubEvent[]): ReportItem[] => {
   return reportData
 }
 
-export const formatReportForSlack = (reportData: ReportItem[]): string => {
+export const formatReportForSlack = (reportData: ReportItem[], timeRange?: TimeRange): string => {
   let text = ""
+
+  // Add time range if provided
+  if (timeRange) {
+    const startDate = formatDateForUrl(timeRange.startDate)
+    const endDate = formatDateForUrl(timeRange.endDate)
+    text += `Time Range: ${startDate} to ${endDate}\n\n`
+  }
 
   reportData.forEach(category => {
     const categoryPrefix = category.title === "Pull Requests" ? "PRs" : category.title
     category.sections.forEach(section => {
       text += `${categoryPrefix} - ${section.title}\n`
       section.items.forEach(item => {
-        text += `• [${truncateMiddle(item.title)}](${item.url})\n`
+        // Add time range parameters to URLs
+        let urlWithTimeRange = item.url
+        if (timeRange) {
+          const startDate = formatDateForUrl(timeRange.startDate)
+          const endDate = formatDateForUrl(timeRange.endDate)
+          const separator = item.url.includes('?') ? '&' : '?'
+          urlWithTimeRange = `${item.url}${separator}timeStart=${startDate}&timeEnd=${endDate}`
+        }
+        text += `• [${truncateMiddle(item.title)}](${urlWithTimeRange})\n`
       })
       text += "\n" // Always add a blank line after each section, even if empty
     })
@@ -172,7 +208,7 @@ export const formatReportForSlack = (reportData: ReportItem[]): string => {
   return text
 }
 
-export const formatReportAsHtml = (reportData: ReportItem[]): string => {
+export const formatReportAsHtml = (reportData: ReportItem[], timeRange?: TimeRange): string => {
   // Helper function to escape HTML
   const escapeHtml = (text: string) => {
     return text
@@ -185,12 +221,27 @@ export const formatReportAsHtml = (reportData: ReportItem[]): string => {
 
   let html = ""
 
+  // Add time range if provided
+  if (timeRange) {
+    const startDate = formatDateForUrl(timeRange.startDate)
+    const endDate = formatDateForUrl(timeRange.endDate)
+    html += `<p class="time-range">Time Range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</p>\n\n`
+  }
+
   reportData.forEach(category => {
     const categoryPrefix = category.title === "Pull Requests" ? "PRs" : category.title
     category.sections.forEach(section => {
       html += `<h3>${escapeHtml(categoryPrefix)} - ${escapeHtml(section.title)}</h3>\n<ul>\n`
       section.items.forEach(item => {
-        html += `  <li><a href="${escapeHtml(item.url)}">${escapeHtml(truncateMiddle(item.title))}</a></li>\n`
+        // Add time range parameters to URLs
+        let urlWithTimeRange = item.url
+        if (timeRange) {
+          const startDate = formatDateForUrl(timeRange.startDate)
+          const endDate = formatDateForUrl(timeRange.endDate)
+          const separator = item.url.includes('?') ? '&' : '?'
+          urlWithTimeRange = `${item.url}${separator}timeStart=${encodeURIComponent(startDate)}&timeEnd=${encodeURIComponent(endDate)}`
+        }
+        html += `  <li><a href="${escapeHtml(urlWithTimeRange)}">${escapeHtml(truncateMiddle(item.title))}</a></li>\n`
       })
       html += `</ul>\n\n`
     })
@@ -199,5 +250,5 @@ export const formatReportAsHtml = (reportData: ReportItem[]): string => {
   return html
 }
 
-// Export truncateMiddle for testing
-export { truncateMiddle } 
+// Export for testing
+export { truncateMiddle, formatDateForUrl } 
