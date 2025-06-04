@@ -279,7 +279,62 @@ function GitHubEventViewerClient() {
     }
   }
 
-  // Add function to copy report
+  // Add function to copy text to clipboard
+  const copyTextToClipboard = async (text: string): Promise<boolean> => {
+    // Try using the clipboard API
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text)
+        return true
+      } catch (err) {
+        console.error('Clipboard API failed:', err)
+      }
+    }
+
+    // Fallback: Create a temporary textarea element
+    try {
+      const textArea = document.createElement('textarea')
+      textArea.value = text
+      // Make it invisible
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      textArea.style.left = '-999999px'
+      textArea.style.top = '-999999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      // Execute the copy command
+      document.execCommand('copy')
+      textArea.remove()
+      return true
+    } catch (err) {
+      console.error('Fallback copy failed:', err)
+      return false
+    }
+  }
+
+  // Add function to copy HTML to clipboard
+  const copyHtmlToClipboard = async (html: string, plainText: string): Promise<boolean> => {
+    // Try using the clipboard API with HTML support
+    if (navigator.clipboard && window.isSecureContext && 'write' in navigator.clipboard) {
+      try {
+        const clipboardItem = new ClipboardItem({
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+          'text/html': new Blob([html], { type: 'text/html' })
+        })
+        await navigator.clipboard.write([clipboardItem])
+        return true
+      } catch (err) {
+        console.error('Copy failed:', err)
+        // Fall back to plain text copy
+        return copyTextToClipboard(plainText)
+      }
+    }
+    // If HTML copy not supported, fall back to plain text
+    return copyTextToClipboard(plainText)
+  }
+
+  // Modify the copyReport function
   const copyReport = async () => {
     const eventsToExport = getFilteredEvents(events)
     const reportData = prepareReportData(eventsToExport)
@@ -289,41 +344,28 @@ function GitHubEventViewerClient() {
       ...item,
       sections: item.sections.filter(section => !collapsedSections.has(`${item.title}-${section.title}`))
     })).filter(item => item.sections.length > 0)
-    
+
+    // Create both text and HTML versions
+    const plainText = formatReportForSlack(visibleReportData)
+    const htmlContent = formatReportAsHtml(visibleReportData)
+
     try {
-      // Create both text and HTML versions
-      const plainText = formatReportForSlack(visibleReportData)
-      const htmlContent = formatReportAsHtml(visibleReportData)
-
-      // Create a clipboard item with both formats
-      const clipboardItem = new ClipboardItem({
-        'text/plain': new Blob([plainText], { type: 'text/plain' }),
-        'text/html': new Blob([htmlContent], { type: 'text/html' })
-      })
-
-      await navigator.clipboard.write([clipboardItem])
-      toast({
-        title: "Copied to clipboard",
-        description: "Summary copied in both text and HTML formats",
-      })
-    } catch (err) {
-      console.error('Copy failed:', err)
-      // Fallback to plain text only if HTML copy fails
-      try {
-        const plainText = formatReportForSlack(visibleReportData)
-        await navigator.clipboard.writeText(plainText)
+      const success = await copyHtmlToClipboard(htmlContent, plainText)
+      if (success) {
         toast({
           title: "Copied to clipboard",
-          description: "Summary copied in text format only",
+          description: "Summary copied successfully",
         })
-      } catch (fallbackErr) {
-        console.error('Fallback copy failed:', fallbackErr)
-        toast({
-          title: "Copy failed",
-          description: "Could not copy to clipboard. Please try again.",
-          variant: "destructive",
-        })
+      } else {
+        throw new Error("Failed to copy to clipboard")
       }
+    } catch (err) {
+      console.error('Copy operation failed:', err)
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
