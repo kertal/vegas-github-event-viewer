@@ -1024,6 +1024,7 @@ function GitHubEventViewerClient() {
                 expandedEvents={expandedEvents}
                 onEventExpand={toggleEventExpansion}
                 expandedGroups={expandedGroups}
+                setExpandedGroups={setExpandedGroups}
               />
             )}
             {viewMode === "report" && (

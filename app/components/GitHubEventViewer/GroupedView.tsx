@@ -11,9 +11,10 @@ interface GroupedViewProps {
   expandedEvents: Set<string>
   onEventExpand: (eventId: string) => void
   expandedGroups: Set<string>
+  setExpandedGroups: (groups: Set<string>) => void
 }
 
-export function GroupedView({ events, expandedEvents, onEventExpand, expandedGroups }: GroupedViewProps) {
+export function GroupedView({ events, expandedEvents, onEventExpand, expandedGroups, setExpandedGroups }: GroupedViewProps) {
   return (
     <>
       {Object.entries(groupEventsByCategoryAndNumber(events))
