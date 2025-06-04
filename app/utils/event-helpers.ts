@@ -6,10 +6,10 @@ export const getEventCategory = (event: GitHubEvent): EventCategory => {
     case "PullRequestEvent":
     case "PullRequestReviewEvent":
     case "PullRequestReviewCommentEvent":
-      return "Pull Requests"
+    return "Pull Requests"
     case "IssuesEvent":
     case "IssueCommentEvent":
-      return "Issues"
+    return "Issues"
     case "PushEvent":
       return "Commits"
     case "CreateEvent":
@@ -22,7 +22,7 @@ export const getEventCategory = (event: GitHubEvent): EventCategory => {
     case "GollumEvent":
       return "Repository"
     default:
-      return "Other"
+  return "Other"
   }
 }
 
@@ -74,7 +74,7 @@ export const groupEventsByCategoryAndNumber = (events: GitHubEvent[]) => {
         url,
         events: []
       }
-    }
+      }
     groups[category][number].events.push(event)
   })
 

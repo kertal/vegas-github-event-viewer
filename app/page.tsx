@@ -256,7 +256,7 @@ function GitHubEventViewerClient() {
       newStartDate.setHours(0, 0, 0, 0)
     }
 
-    validateAndSetDates(newStartDate, newEndDate)
+    validateAndSetDates({ startDate: newStartDate, endDate: newEndDate })
     setQuickSelectOpen(false)
   }
 
@@ -327,7 +327,37 @@ function GitHubEventViewerClient() {
     }
   }
 
-  // Load user preferences and handle URL parameters
+  // Helper function to validate and set dates
+  const validateAndSetDates = (range: { startDate: Date | null; endDate: Date | null }) => {
+    const newStartDate = range.startDate || startDate
+    const newEndDate = range.endDate || endDate
+
+    // Ensure we have valid date objects
+    if (isNaN(newStartDate.getTime()) || isNaN(newEndDate.getTime())) return
+
+    // Create start of day for start date and end of day for end date
+    const validStart = startOfDay(newStartDate)
+    const validEnd = endOfDay(newEndDate)
+
+    // If start date is after end date, adjust the other date
+    if (validStart > validEnd) {
+      if (range.startDate) { // If changing start date
+        setStartDate(validStart)
+        setEndDate(endOfDay(validStart))
+      } else if (range.endDate) { // If changing end date
+        setStartDate(startOfDay(validEnd))
+        setEndDate(validEnd)
+      }
+    } else {
+      // Normal case - dates are in correct order
+      if (range.startDate) setStartDate(validStart)
+      if (range.endDate) setEndDate(validEnd)
+    }
+
+    setHasPendingChanges(true)
+  }
+
+  // Handle initial URL parameters - only run once on mount
   useEffect(() => {
     // Get usernames from URL first
     const urlUsernames = searchParams.get('usernames')
@@ -336,25 +366,52 @@ function GitHubEventViewerClient() {
     // Get dates from URL
     const urlStartDate = searchParams.get('startDate')
     const urlEndDate = searchParams.get('endDate')
-    let newStartDate = startDate
-    let newEndDate = endDate
+
+    let initialStartDate = startDate
+    let initialEndDate = endDate
 
     if (urlStartDate && urlEndDate) {
       const parsedStart = new Date(urlStartDate)
       const parsedEnd = new Date(urlEndDate)
       if (!isNaN(parsedStart.getTime()) && !isNaN(parsedEnd.getTime())) {
-        newStartDate = startOfDay(parsedStart)
-        newEndDate = endOfDay(parsedEnd)
+        initialStartDate = startOfDay(parsedStart)
+        initialEndDate = endOfDay(parsedEnd)
+      }
+    } else {
+      // If no URL dates, try to load from localStorage
+      const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
+      if (savedPrefs) {
+        try {
+          const prefs: UserPreferences = JSON.parse(savedPrefs)
+          const savedStart = new Date(prefs.startDate)
+          const savedEnd = new Date(prefs.endDate)
+          if (!isNaN(savedStart.getTime()) && !isNaN(savedEnd.getTime())) {
+            initialStartDate = startOfDay(savedStart)
+            initialEndDate = endOfDay(savedEnd)
+          }
+        } catch (error) {
+          console.error("Error parsing saved preferences:", error)
+        }
       }
     }
+
+    // Set initial dates
+    setStartDate(initialStartDate)
+    setEndDate(initialEndDate)
     
-    // If URL has valid usernames, use them
+    // Get view mode from URL
+    const urlViewMode = searchParams.get('view') as ViewMode | null
+    if (urlViewMode && ['timeline', 'grouped', 'report'].includes(urlViewMode)) {
+      setViewMode(urlViewMode)
+    }
+    
+    // Handle usernames
     if (parsedUrlUsernames.length > 0) {
       setUsernames(parsedUrlUsernames)
       setUsernameInput(parsedUrlUsernames.join(', '))
       setHasPendingChanges(true)
     } else {
-      // Otherwise, try to load from localStorage
+      // Try to load usernames from localStorage
       const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
       if (savedPrefs) {
         try {
@@ -364,11 +421,6 @@ function GitHubEventViewerClient() {
             setUsernameInput(prefs.usernames.join(', '))
             setHasPendingChanges(true)
           }
-          // Only use saved dates if no URL dates
-          if (!urlStartDate && !urlEndDate) {
-            newStartDate = startOfDay(new Date(prefs.startDate))
-            newEndDate = endOfDay(new Date(prefs.endDate))
-          }
         } catch (error) {
           console.error("Error parsing saved preferences:", error)
         }
@@ -376,15 +428,14 @@ function GitHubEventViewerClient() {
     }
 
     // Set the dates
-    setStartDate(newStartDate)
-    setEndDate(newEndDate)
+    setStartDate(startDate)
+    setEndDate(endDate)
 
     // Load other preferences from localStorage
     const savedPrefs = localStorage.getItem("github-event-viewer-prefs")
     if (savedPrefs) {
       try {
         const prefs: UserPreferences = JSON.parse(savedPrefs)
-        setViewMode(prefs.viewMode || "grouped")
         setSelectedRepos(new Set(prefs.selectedRepos || []))
         setSelectedEventTypes(new Set(prefs.selectedEventTypes || []))
         setSelectedLabels(new Set(prefs.selectedLabels || []))
@@ -412,46 +463,32 @@ function GitHubEventViewerClient() {
     if (lastSync) {
       setLastSynced(lastSync)
     }
-  }, [searchParams]) // Add searchParams as dependency
+  }, []) // Empty dependency array - only run once on mount
 
-  // Update URL when dates change
+  // Update URL when parameters change - use a ref to prevent unnecessary updates
+  const lastUrlUpdate = React.useRef('')
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
+    
+    // Update all URL parameters at once
     params.set('startDate', startDate.toISOString().split('T')[0])
     params.set('endDate', endDate.toISOString().split('T')[0])
-    router.push(`?${params.toString()}`, { scroll: false })
-  }, [startDate, endDate, router, searchParams])
-
-  // Update URL when usernames change
-  useEffect(() => {
-    if (usernames.length > 0) {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('usernames', usernames.join(','))
-      router.push(`?${params.toString()}`)
-    } else {
-      const params = new URLSearchParams(searchParams.toString())
-      params.delete('usernames')
-      router.push(`?${params.toString()}`)
-    }
-  }, [usernames, router, searchParams])
-
-  // Add effect to handle view mode URL state
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
-    const urlViewMode = params.get('view') as ViewMode | null
     
-    // If URL has a valid view mode, use it
-    if (urlViewMode && ['timeline', 'grouped', 'report'].includes(urlViewMode)) {
-      setViewMode(urlViewMode)
+    if (usernames.length > 0) {
+      params.set('usernames', usernames.join(','))
+    } else {
+      params.delete('usernames')
     }
-  }, [searchParams]) // Only run when URL params change
-
-  // Update URL when view mode changes
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    
     params.set('view', viewMode)
-    router.push(`?${params.toString()}`, { scroll: false })
-  }, [viewMode, router, searchParams])
+    
+    const newUrl = params.toString()
+    // Only update if the URL actually changed
+    if (newUrl !== lastUrlUpdate.current) {
+      lastUrlUpdate.current = newUrl
+      router.push(`?${newUrl}`, { scroll: false })
+    }
+  }, [startDate, endDate, usernames, viewMode, router, searchParams])
 
   // Save preferences to localStorage when they change
   useEffect(() => {
@@ -654,22 +691,8 @@ function GitHubEventViewerClient() {
         end.setHours(23, 59, 59, 999)
     }
 
-    validateAndSetDates(start, end)
+    validateAndSetDates({ startDate: start, endDate: end })
     setQuickSelectOpen(false)
-  }
-
-  // Helper function to validate and set dates
-  const validateAndSetDates = (newStartDate: Date | null, newEndDate: Date | null) => {
-    const validRange = validateDateRange(newStartDate, newEndDate)
-    if (!validRange) return
-
-    // Only set pending changes if dates actually changed
-    if (validRange.startDate.getTime() !== startDate.getTime() || 
-        validRange.endDate.getTime() !== endDate.getTime()) {
-      setStartDate(validRange.startDate)
-      setEndDate(validRange.endDate)
-      setHasPendingChanges(true)
-    }
   }
 
   // Get unique repositories from events
@@ -901,7 +924,7 @@ function GitHubEventViewerClient() {
         onUsernameChange={setUsernameInput}
         dateRange={{ startDate, endDate }}
         onDateChange={({ startDate: newStart, endDate: newEnd }) => {
-          validateAndSetDates(newStart, newEnd)
+          validateAndSetDates({ startDate: newStart, endDate: newEnd })
         }}
         onSubmit={handleSubmit}
         isSyncing={isSyncing}

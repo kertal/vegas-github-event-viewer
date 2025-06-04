@@ -20,7 +20,7 @@ export interface GitHubEvent {
       merged?: boolean
       merged_by?: {
         login: string
-      }
+  }
       user?: {
         login: string
       }
